@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BLOCKFIRE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14181f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BLOCKFIRE">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  :root {
+    --bg: #14181f; --panel: #1d232d; --edge: #0b0e13; --hi: #3a4556;
+    --text: #e8edf4; --dim: #8d99ab; --accent: #ff7a2f; --accent2: #ffb347;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "Courier New", Menlo, Consolas, monospace; }
+  canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+
+  /* crosshair: 4 bars pushed out by --gap (the projected spread cone) */
+  .hud .crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; --gap: 4px; }
+  .hud .crosshair b { position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.55); }
+  .hud .crosshair b.t, .hud .crosshair b.bm { left: -1px; width: 2px; height: 8px; }
+  .hud .crosshair b.l, .hud .crosshair b.r { top: -1px; height: 2px; width: 8px; }
+  .hud .crosshair b.t  { top: calc(-1 * var(--gap) - 8px); }  .hud .crosshair b.bm { top: var(--gap); }
+  .hud .crosshair b.l  { left: calc(-1 * var(--gap) - 8px); } .hud .crosshair b.r  { left: var(--gap); }
+  .hud .crosshair i { position: absolute; left: -1px; top: -1px; width: 2px; height: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+  .hud .crosshair:not(.gun) b { --gap: 2px; }
+  .hud .hitmarker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; pointer-events: none; opacity: 0; transition: opacity .05s; }
+  .hud .hitmarker::before, .hud .hitmarker::after { content: ""; position: absolute; left: 12px; top: -2px; width: 2px; height: 30px; background: #fff;
+    transform: rotate(45deg); box-shadow: 0 0 0 1px rgba(0,0,0,.5); clip-path: polygon(0 0, 100% 0, 100% 35%, 0 35%, 0 65%, 100% 65%, 100% 100%, 0 100%); }
+  .hud .hitmarker::after { transform: rotate(-45deg); }
+  .hud .hitmarker.head::before, .hud .hitmarker.head::after { background: #ffd23f; }
+  .hud .hitmarker.kill::before, .hud .hitmarker.kill::after { background: #ff4b3a; }
+
+  /* combat HUD */
+  .hud .vitals { position: absolute; left: 16px; bottom: 16px; width: 260px; pointer-events: none; }
+  .bar { position: relative; height: 18px; margin-top: 4px; background: rgba(10,13,18,.7); border: 2px solid rgba(0,0,0,.8); }
+  .bar > i { position: absolute; left: 0; top: 0; bottom: 0; transition: width .12s; }
+  .bar > span { position: absolute; right: 6px; top: 0; font-size: 13px; font-weight: bold; line-height: 15px; text-shadow: 1px 1px 0 #000; }
+  .hud .shieldBar { background: linear-gradient(#6fc1ff, #2f7fe0); }
+  .hud .healthBar { background: linear-gradient(#7af06e, #34b23a); }
+  .hud .healthBar.healing { background: linear-gradient(#d4ffcc, #5be06a); box-shadow: 0 0 10px #8cff7a; }
+  .bar.shield { height: 12px; } .bar.shield > span { font-size: 11px; line-height: 9px; }
+  .hud .ammo { position: absolute; right: 16px; bottom: 16px; text-align: right; pointer-events: none; text-shadow: 2px 2px 0 #000; }
+  .hud .ammoName { font-size: 13px; letter-spacing: 1px; font-weight: bold; }
+  .hud .ammoMag { font-size: 34px; font-weight: bold; }
+  .hud .ammoMag.empty { color: #ff5a4a; }
+  .hud .ammoReserve { font-size: 16px; color: #c3cad6; margin-left: 4px; }
+  .hud .dmgNumbers .num { position: absolute; transform: translate(-50%, -50%); font-size: 20px; font-weight: bold; color: #fff;
+    text-shadow: 2px 2px 0 #000, -1px -1px 0 #000; pointer-events: none; }
+  .hud .dmgNumbers .num.head { color: #ffd23f; font-size: 24px; }
+  .hud .dmgNumbers .num.shield { color: #6fc1ff; }
+  .hud .killfeed { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; pointer-events: none; }
+  .hud .killfeed div { padding: 3px 8px; font-size: 13px; background: rgba(0,0,0,.5); }
+  .hud .killfeed div.mine { background: rgba(120,40,0,.65); }
+  .hud .killfeed i { color: #c3cad6; font-style: normal; }
+  .hud .scope { position: absolute; inset: 0; display: none; pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, transparent 0, transparent 34vh, rgba(0,0,0,.92) 34.3vh); }
+  .hud .scope::before, .hud .scope::after { content: ""; position: absolute; background: rgba(0,0,0,.85); }
+  .hud .scope::before { left: 50%; top: 16vh; bottom: 16vh; width: 2px; margin-left: -1px; }
+  .hud .scope::after { top: 50%; left: calc(50% - 34vh); right: calc(50% - 34vh); height: 2px; margin-top: -1px; }
+  .hud .progress { position: absolute; left: 50%; top: calc(50% + 48px); transform: translateX(-50%); width: 180px; text-align: center; pointer-events: none; }
+  .hud .progressLabel { font-size: 13px; text-shadow: 1px 1px 0 #000; }
+  .hud .progress .bar { height: 8px; } .hud .progressFill { background: #fff; }
+  .hud .prompt { position: absolute; left: 50%; top: calc(50% + 84px); transform: translateX(-50%); padding: 4px 10px; font-size: 14px;
+    background: rgba(0,0,0,.55); pointer-events: none; white-space: nowrap; }
+  kbd { display: inline-block; padding: 0 5px; margin-right: 4px; background: #e8edf4; color: #111; font: inherit; font-weight: bold; }
+  .hud .death { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(70,0,0,.35); pointer-events: none; }
+  .hud .death h2 { margin: 0; font-size: 46px; letter-spacing: 8px; color: #ff5a4a; text-shadow: 4px 4px 0 #300; }
+  .hud .death p { margin: 6px; font-size: 16px; }
+  .hud .hurt { position: absolute; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(200,0,0,.55) 100%); }
+  .slot.rar { background: linear-gradient(color-mix(in srgb, var(--rar) 30%, #2a313d), #2a313d 75%); border-color: color-mix(in srgb, var(--rar) 60%, #0b0e13); }
+  .slot .count.mag { color: #ffe9a8; font-size: 12px; }
+
+  /* build HUD */
+  .hud .buildbar { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); display: flex; gap: 3px; align-items: center;
+    padding: 3px; background: rgba(20,40,70,.7); border: 2px solid #4aa8ff; pointer-events: none; }
+  .hud .mats { position: absolute; right: 16px; bottom: 92px; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; pointer-events: none; }
+  .hud .mats.active { background: rgba(20,40,70,.55); }
+  .bpiece { position: relative; width: 34px; height: 34px; background: #2a313d; border: 2px solid #0b0e13; }
+  .bpiece.sel { border-color: #fff; box-shadow: 0 0 0 2px #4aa8ff; }
+  .bpiece i { position: absolute; inset: 7px; background: #9fc9ff; }
+  .bpiece.wall i { left: 13px; right: 13px; }
+  .bpiece.floor i { top: 19px; bottom: 9px; clip-path: polygon(25% 0, 100% 0, 75% 100%, 0 100%); }
+  .bpiece.ramp i { clip-path: polygon(0 100%, 100% 0, 100% 100%); }
+  .bpiece.roof i { clip-path: polygon(50% 10%, 100% 80%, 0 80%); }
+  .bpiece b { position: absolute; left: 2px; top: 0; font-size: 10px; color: rgba(255,255,255,.6); font-weight: normal; }
+  .bmat { position: relative; display: flex; align-items: center; gap: 2px; padding: 2px 6px 2px 2px; border: 2px solid transparent; }
+  .bmat img { width: 26px; height: 26px; image-rendering: pixelated; }
+  .bmat span { font-size: 13px; font-weight: bold; text-shadow: 1px 1px 0 #000; min-width: 22px; }
+  .bmat.sel { border-color: #ffd34a; background: rgba(255,211,74,.12); }
+  .bmat.low span { color: #ff6a5a; }
+  .hud .buildHint { position: absolute; left: 50%; bottom: 112px; transform: translateX(-50%); font-size: 13px; padding: 3px 10px;
+    background: rgba(0,0,0,.5); white-space: nowrap; pointer-events: none; }
+  .hud .pieceHp { position: absolute; left: 50%; top: calc(50% - 46px); transform: translateX(-50%); width: 120px; text-align: center; pointer-events: none; }
+  .hud .pieceHp .bar { height: 7px; margin-top: 2px; } .hud .pieceHpFill { background: #9fc9ff; }
+  .hud .pieceHpText { font-size: 11px; text-shadow: 1px 1px 0 #000; }
+
+  /* vehicle HUD */
+  .hud .vehicleHud { position: absolute; left: 16px; bottom: 76px; width: 220px; padding: 8px 10px; background: rgba(10,13,18,.6);
+    border: 2px solid rgba(0,0,0,.7); pointer-events: none; font-size: 12px; }
+  .hud .vehicleHud .vname { font-weight: bold; letter-spacing: 1px; color: var(--accent2); }
+  .hud .vehicleHud .vspeed { font-size: 13px; color: #c3cad6; } .hud .vehicleHud .vspeed b { font-size: 28px; color: #fff; }
+  .hud .vehicleHud .vrow { display: grid; grid-template-columns: 40px 1fr; align-items: center; margin-top: 3px; }
+  .hud .vehicleHud .bar { height: 9px; margin: 0; } .vhp { background: #9fc9ff; } .vfuel { background: #f2c230; } .vfuel.low { background: #ff5a4a; }
+  .hud .vehicleHud .vseats { margin-top: 5px; display: flex; gap: 3px; }
+  .hud .vehicleHud .vseats span { width: 18px; height: 18px; text-align: center; line-height: 18px; background: #2a313d; font-size: 11px; }
+  .hud .vehicleHud .vseats span.taken { background: #5b6b83; } .hud .vehicleHud .vseats span.me { background: var(--accent); color: #111; }
+  .hud .vehicleHud .vkeys { margin-top: 6px; color: #c3cad6; }
+
+  /* match HUD */
+  .hud .minimap { position: absolute; right: 12px; top: 12px; width: 184px; height: 184px; border: 2px solid rgba(0,0,0,.8);
+    box-shadow: 0 0 0 2px rgba(255,255,255,.15); background: #183457; pointer-events: none; display: none; }
+  .hud .minimapCanvas { width: 180px; height: 180px; image-rendering: pixelated; display: block; }
+  body.match .hud .killfeed { top: 238px; }
+  .hud .matchInfo { position: absolute; right: 12px; top: 200px; width: 184px; text-align: center; font-size: 13px; padding: 2px 0;
+    background: rgba(0,0,0,.55); pointer-events: none; display: none; }
+  .hud .matchInfo b { font-size: 15px; color: var(--accent2); }
+  .hud .stormInfo { position: absolute; right: 12px; top: 220px; width: 184px; text-align: center; font-size: 12px; padding: 2px 0;
+    background: rgba(70,20,110,.6); pointer-events: none; display: none; }
+  .hud .stormInfo.closing { background: rgba(160,40,220,.8); }
+  .hud .compass { position: absolute; left: 50%; top: 8px; width: 360px; height: 22px; margin-left: -180px; overflow: hidden; pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(0,0,0,.5) 20%, rgba(0,0,0,.5) 80%, transparent); }
+  .hud .compass .strip { position: absolute; left: 180px; top: 0; height: 22px; }
+  .hud .compass span { position: absolute; top: 3px; transform: translateX(-50%); font-size: 11px; color: rgba(255,255,255,.55); }
+  .hud .compass span.cardinal { color: #fff; font-weight: bold; font-size: 13px; top: 2px; }
+  .hud .compass::after { content: ""; position: absolute; left: 179px; bottom: 0; width: 2px; height: 6px; background: var(--accent); }
+  .hud .stormTint { position: absolute; inset: 0; background: rgba(120,30,200,1); pointer-events: none; opacity: 0; transition: opacity .3s; mix-blend-mode: multiply; }
+  .hud .spectating { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); padding: 4px 12px; background: rgba(0,0,0,.6);
+    font-size: 14px; letter-spacing: 2px; pointer-events: none; }
+  #results { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(6,8,12,.7); z-index: 30; }
+  #results h1 { font-size: 36px; } #results h1.win { color: #ffd34a; text-shadow: 3px 3px 0 #6a4a00; }
+  #results .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 4px; }
+  #results .stats div { background: #12161d; border: 2px solid var(--edge); padding: 10px 4px; text-align: center; }
+  #results .stats b { display: block; font-size: 24px; color: var(--accent2); }
+  #results .stats span { font-size: 11px; color: var(--dim); }
+  #results .stats .who { display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--accent); background: transparent; border: 0; }
+  #results .stats:has(.who) { grid-template-columns: 40px repeat(4, 1fr); }
+  #loading .lbar { width: 240px; height: 10px; margin-top: 12px; border: 2px solid #000; background: #222; }
+  #loading .lbar i { display: block; height: 100%; width: 0; background: var(--accent); }
+
+  #debug { position: fixed; left: 8px; top: 8px; margin: 0; padding: 6px 8px; font-size: 12px; line-height: 1.35;
+    background: rgba(0,0,0,.45); color: #dfe7f2; pointer-events: none; white-space: pre; }
+  #loading { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
+    background: rgba(10,14,20,.78); font-size: 20px; letter-spacing: 2px; pointer-events: none; }
+  #loading small { margin-top: 10px; color: var(--dim); font-size: 13px; letter-spacing: 0; }
+
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(8,10,14,.72); }
+  #overlay.hidden { display: none; }
+  .panel { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 26px 24px;
+    background: var(--panel); border: 4px solid var(--edge); box-shadow: inset 0 0 0 2px var(--hi), 6px 6px 0 rgba(0,0,0,.5); }
+  h1 { margin: 0 0 2px; font-size: 40px; letter-spacing: 6px; color: var(--accent);
+    text-shadow: 3px 3px 0 #5c2200; }
+  .sub { margin: 0 0 18px; color: var(--dim); font-size: 13px; }
+  label { display: flex; align-items: center; gap: 10px; margin: 9px 0; font-size: 14px; }
+  label span.name { width: 130px; color: var(--dim); }
+  label span.val { width: 42px; text-align: right; }
+  input[type=text] { flex: 1; padding: 6px 8px; background: #0f1319; color: var(--text); border: 2px solid var(--edge);
+    font: inherit; outline: none; }
+  input[type=text]:focus { border-color: var(--accent); }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  .row { display: flex; gap: 10px; margin-top: 18px; }
+  button { flex: 1; padding: 12px 10px; font: inherit; font-size: 15px; font-weight: bold; letter-spacing: 2px; cursor: pointer;
+    color: #1a1006; background: var(--accent); border: 3px solid var(--edge); box-shadow: inset -3px -3px 0 rgba(0,0,0,.28), inset 3px 3px 0 rgba(255,255,255,.28); }
+  button:hover { background: var(--accent2); }
+  button.alt { background: #4a586d; color: var(--text); }
+  button.alt:hover { background: #5b6b83; }
+  button[hidden] { display: none; }
+  .keys { font-size: 12px; color: var(--dim); display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; align-content: start; }
+  .panel.menu { width: min(760px, calc(100vw - 32px)); position: relative; }
+  .winctl { position: absolute; right: 22px; top: 22px; display: flex; gap: 6px; }
+  .winctl button { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; letter-spacing: 1px; }
+  body.app { -webkit-user-select: none; user-select: none; cursor: default; }
+  body.app input[type=text] { -webkit-user-select: text; user-select: text; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .tabs .tab { flex: 0 0 auto; padding: 7px 14px; font-size: 13px; background: #2a313d; color: var(--dim); box-shadow: none; }
+  .tabs .tab.sel { background: var(--accent); color: #1a1006; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .mode { text-align: left; padding: 10px 12px; background: #252c37; color: var(--text); letter-spacing: 1px; }
+  .mode b { display: block; font-size: 15px; } .mode span { display: block; font-size: 11px; color: var(--dim); font-weight: normal; letter-spacing: 0; margin-top: 3px; }
+  .mode:hover { background: #2f3846; } .mode.sel { background: #3b2a1c; box-shadow: inset 0 0 0 2px var(--accent); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  select { flex: 1; padding: 5px; background: #0f1319; color: var(--text); border: 2px solid var(--edge); font: inherit; }
+  label .hint { color: var(--dim); font-size: 11px; }
+  input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
+  section[hidden] { display: none; }
+  .online-box { margin: 10px 0; padding: 10px 12px; background: #161b23; border: 2px solid var(--edge); }
+  .online-box b { color: var(--accent2); letter-spacing: 2px; }
+  .online-box .hint { display: block; margin: 4px 0 8px; }
+  .online-box button { width: 100%; }
+  #netStatus { margin-top: 8px; font-size: 13px; color: var(--accent2); min-height: 16px; }
+  #netBadge { position: fixed; left: 50%; top: 36px; transform: translateX(-50%); padding: 2px 10px; font-size: 12px; letter-spacing: 1px;
+    background: rgba(20,40,70,.7); border: 1px solid #4aa8ff; pointer-events: none; z-index: 5; white-space: nowrap; }
+  #lobby { position: fixed; left: 50%; top: 70px; transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); padding: 12px 16px;
+    background: rgba(13,17,23,.88); border: 3px solid var(--edge); box-shadow: inset 0 0 0 2px var(--hi); pointer-events: none; z-index: 6; text-align: center; }
+  #lobby h3 { margin: 0 0 4px; letter-spacing: 3px; color: var(--accent); }
+  #lobby .code { font-size: 30px; letter-spacing: 8px; color: #fff; margin: 4px 0; }
+  #lobby .who { font-size: 13px; color: var(--dim); margin: 6px 0; }
+  #lobby .go { font-size: 14px; color: var(--accent2); }
+  .keys b { color: var(--text); font-weight: normal; }
+  .keys b.sh { color: #9fe0ff; margin-top: 6px; letter-spacing: 2px; }
+  #err { color: #ff6b6b; margin-top: 10px; font-size: 12px; display: none; }
+
+  /* ---- item slots (hotbar + screens) ---- */
+  :root { --slot: 44px; }
+  .slot { position: relative; width: var(--slot); height: var(--slot); background: #2a313d;
+    border: 2px solid var(--edge); box-shadow: inset 2px 2px 0 rgba(0,0,0,.35), inset -2px -2px 0 rgba(255,255,255,.06); }
+  .slot .inner, .slot.inner { position: absolute; inset: 0; }
+  .slot img { position: absolute; left: 4px; top: 4px; width: 32px; height: 32px; image-rendering: pixelated; pointer-events: none; }
+  .slot .count { position: absolute; right: 2px; bottom: 0; font-size: 13px; font-weight: bold; color: #fff;
+    text-shadow: 1px 1px 0 #000, -1px 0 0 #000, 0 -1px 0 #000; pointer-events: none; }
+  .slot i.dur { position: absolute; left: 4px; bottom: 3px; height: 3px; pointer-events: none; }
+
+  .hud .hotbar { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 2px; padding: 3px;
+    background: rgba(10,13,18,.55); border: 2px solid rgba(0,0,0,.6); pointer-events: none; }
+  .hud .hotbar .slot { background: rgba(42,49,61,.82); }
+  .hud .hotbar.dim { opacity: .45; }
+  .hud .hotbar .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent), inset 0 0 0 1px rgba(255,255,255,.4); z-index: 1; }
+  .hud .hotbar .key { position: absolute; left: 3px; top: 1px; font-size: 10px; color: rgba(255,255,255,.45); font-weight: normal; }
+  .hud .itemName.hide { display: none; }
+  .hud .itemName { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); padding: 3px 10px; font-size: 14px;
+    background: rgba(0,0,0,.55); color: #fff; pointer-events: none; opacity: 0; white-space: nowrap; }
+
+  #screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.55); }
+  #screen.hidden { display: none; }
+  #screen .panel { width: auto; padding: 16px 18px 18px; user-select: none; }
+  #screen h2 { margin: 0 0 12px; font-size: 16px; letter-spacing: 3px; color: var(--accent2); text-transform: uppercase; }
+  #screenTop { display: flex; align-items: center; gap: 18px; min-height: 110px; margin-bottom: 14px; padding-left: 4px; }
+  .craftgrid { display: grid; gap: 2px; }
+  .slot.big { --slot: 54px; width: 54px; height: 54px; }
+  .slot.big img { left: 9px; top: 9px; }
+  .arrow { position: relative; width: 44px; height: 16px; background: #3a4352; clip-path: polygon(0 30%, 65% 30%, 65% 0, 100% 50%, 65% 100%, 65% 70%, 0 70%); }
+  .arrow.progress i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent2); }
+  .furnacecol { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .flame { position: relative; width: 20px; height: 22px; background: #3a4352;
+    clip-path: polygon(50% 0, 80% 40%, 100% 70%, 75% 100%, 25% 100%, 0 70%, 20% 40%); }
+  .flame i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: linear-gradient(#ffd34a, #ff6a1a); }
+  .inv-label { font-size: 11px; color: var(--dim); letter-spacing: 2px; margin: 0 0 4px 2px; }
+  .grid9 { display: grid; grid-template-columns: repeat(9, var(--slot)); gap: 2px; }
+  #screenHot { margin-top: 8px; }
+  #screen .slot:hover { background: #3a4456; }
+  #cursorStack { position: fixed; width: 36px; height: 36px; pointer-events: none; display: none; z-index: 20; }
+  #cursorStack img { position: absolute; left: 2px; top: 2px; width: 32px; height: 32px; image-rendering: pixelated; }
+  #cursorStack .count { position: absolute; right: -2px; bottom: -2px; font-size: 13px; font-weight: bold; color: #fff;
+    text-shadow: 1px 1px 0 #000, -1px 0 0 #000; }
+  #tooltip { position: fixed; display: none; padding: 3px 8px; font-size: 13px; background: #120d1e; color: #fff;
+    border: 2px solid #3b2a66; pointer-events: none; z-index: 21; white-space: nowrap; }
+
+  /* ---- story mode ---- */
+  .mode.story { grid-column: 1 / -1; background: #1e2a33; } .mode.story b { color: #9fe0ff; }
+  .hint { color: var(--dim); font-size: 12px; }
+  .storyHud { position: absolute; inset: 0; pointer-events: none; }
+  .storyObj { position: absolute; left: 14px; top: 12px; max-width: 360px; padding: 6px 10px; background: rgba(8,12,18,.62); border-left: 3px solid #ffd34a; }
+  .storyObj .t { font-size: 11px; letter-spacing: 2px; color: #ffd34a; text-transform: uppercase; }
+  .storyObj .x { font-size: 15px; margin-top: 2px; text-shadow: 1px 1px 0 #000; }
+  .storyObj .x.fail { color: #ff6a5a; }
+  .storyObj .d { color: #ffb347; font-size: 12px; } .storyObj em.timer { color: #ff6a5a; font-style: normal; font-weight: bold; }
+  .storyObj .h { font-size: 11px; color: #b7c2d0; margin-top: 3px; }
+  .storyStatus { display: flex; gap: 12px; align-items: center; margin-top: 6px; font-size: 13px; text-shadow: 1px 1px 0 #000; }
+  .storyStatus .noto { display: flex; gap: 3px; }
+  .storyStatus .noto i { width: 14px; height: 14px; border: 2px solid #000; background: linear-gradient(to top, #e0342a var(--f), rgba(40,40,46,.7) var(--f)); transform: rotate(45deg); }
+  .storyStatus .silver { color: #e6e9ee; } .storyStatus .silver b { color: #c6ccd6; font-weight: normal; font-size: 11px; }
+  .storyMarker { position: absolute; transform: translate(-50%, -50%); text-align: center; }
+  .storyMarker i { display: block; width: 14px; height: 14px; margin: 0 auto; background: #ff7a2f; border: 2px solid #000; transform: rotate(45deg); box-shadow: 0 0 6px rgba(255,140,40,.8); }
+  .storyMarker span { display: block; margin-top: 4px; font-size: 11px; color: #ffd8b0; text-shadow: 1px 1px 0 #000; }
+  .storyMarker.off i { background: #ffb347; }
+  .storyMarker.supply i { width: 13px; height: 11px; background: #7a5230; border: 2px solid #1a120a; transform: none; border-radius: 2px; box-shadow: 0 0 5px rgba(255,210,150,.5); opacity: .8; }
+  .storyMarker.supply span { color: #e8d2b0; opacity: .85; }
+  .storyMarker.supply.low i { opacity: 1; box-shadow: 0 0 8px rgba(255,200,110,.95); background: #a06a34; }
+  .storyMarker.supply.low span { color: #ffe0a8; opacity: 1; font-weight: bold; }
+  .storyMeters .meter { position: absolute; width: 22px; height: 14px; margin: -7px 0 0 -11px; border: 2px solid #000; border-radius: 50%;
+    background: linear-gradient(to top, #ffd23f var(--f), rgba(30,30,34,.7) var(--f)); }
+  .storyMeters .meter i { position: absolute; left: 6px; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: #111; }
+  .storyMeters .meter.hunt { background: #ff3b2f; box-shadow: 0 0 8px #ff3b2f; }
+  .storyMeters .meter.hunt::after { content: "!"; position: absolute; left: 6px; top: -20px; font-weight: bold; font-size: 16px; color: #ff3b2f; text-shadow: 1px 1px 0 #000; }
+  .storyMeters .meter.off { transform: rotate(var(--a)); border-radius: 0 50% 50% 0; }
+  .storyBarks .bark { position: absolute; transform: translate(-50%, -100%); padding: 2px 7px; font-size: 12px; background: rgba(0,0,0,.6); color: #f2e6c8; white-space: nowrap; }
+  .storySub { position: absolute; left: 50%; bottom: 112px; transform: translateX(-50%); max-width: min(720px, 90%); padding: 6px 12px; text-align: center;
+    background: rgba(0,0,0,.6); font-size: 15px; display: none; text-shadow: 1px 1px 0 #000; }
+  .storySub b { color: #ffd34a; margin-right: 6px; }
+  .storyTitle { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); text-align: center; display: none; white-space: nowrap; }
+  .storyTitle h2 { margin: 0; font-size: 30px; letter-spacing: 6px; color: #fff; text-shadow: 3px 3px 0 #000; animation: titleIn .6s ease-out; }
+  .storyTitle p { margin: 6px 0 0; font-size: 15px; color: #ffd34a; text-shadow: 2px 2px 0 #000; }
+  .storyTitle.desync h2 { color: #9fe0ff; text-shadow: 3px 0 0 #ff2a6a, -3px 0 0 #2affd4; animation: glitch .25s steps(2) infinite; }
+  @keyframes titleIn { from { letter-spacing: 20px; opacity: 0; } to { letter-spacing: 6px; opacity: 1; } }
+  @keyframes glitch { 0% { transform: translateX(-2px); } 100% { transform: translateX(2px); } }
+  .storyPrompt { position: absolute; left: 50%; top: calc(50% + 60px); transform: translateX(-50%); padding: 4px 10px; font-size: 14px; background: rgba(0,0,0,.55); display: none; white-space: nowrap; }
+  .storyProgress { position: absolute; left: 50%; top: calc(50% + 40px); transform: translateX(-50%); width: 200px; text-align: center; display: none; font-size: 13px; text-shadow: 1px 1px 0 #000; }
+  .storyProgress .bar { height: 8px; } .storyProgress i { background: #ffd34a; }
+  .storyStealth { position: absolute; left: 16px; bottom: 64px; padding: 2px 8px; font-size: 12px; letter-spacing: 2px; color: #9fe0ff; background: rgba(0,0,0,.5); display: none; }
+  .storyToast { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); padding: 4px 12px; font-size: 13px; background: rgba(10,20,30,.75); border: 1px solid #4aa8ff; display: none; white-space: nowrap; }
+  .storyToast.warn { border-color: #ff6a5a; color: #ffd0c8; }
+  .storyVignette { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s;
+    background: radial-gradient(ellipse at center, transparent 45%, rgba(200,160,60,.55) 100%); }
+  .storyVignette.hidden { opacity: 1; }
+  .storyVignette.sync { animation: syncFlash 1.4s ease-out; }
+  @keyframes syncFlash { 0% { opacity: 1; background: rgba(255,255,255,.85); } 100% { opacity: 0; background: rgba(255,255,255,0); } }
+  .storyReticle { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 2px solid #ff3b2f; transform: rotate(45deg); display: none; box-shadow: 0 0 8px #ff3b2f; }
+  #storyScreen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.6); z-index: 25; }
+  #storyScreen.hidden { display: none; }
+  #storyScreen h2 { margin: 0 0 10px; font-size: 18px; letter-spacing: 4px; color: var(--accent2); }
+  #storyScreen .storyMap { width: auto; text-align: center; }
+  #storyScreen .storyMap canvas { width: min(78vh, 86vw); height: min(78vh, 86vw); image-rendering: pixelated; border: 3px solid #000; cursor: pointer; }
+  #storyScreen .offer { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: 8px 0; padding: 8px 10px; background: #161b23; border: 2px solid var(--edge); }
+  #storyScreen .offer b { display: block; color: #fff; } #storyScreen .offer span { display: block; font-size: 12px; color: var(--dim); margin-top: 2px; }
+  #storyScreen .offer button { flex: 0 0 auto; width: 120px; padding: 8px; font-size: 13px; }
+  #storyScreen button[disabled] { opacity: .45; cursor: default; }
+
+  /* per-player HUD roots (two side by side in split-screen) */
+  .hud { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  body.split .hud[data-player="0"] { right: 50%; }
+  body.split .hud[data-player="1"] { left: 50%; border-left: 3px solid #000; }
+  .hud[data-player="1"] { display: none; }
+  body.split .hud[data-player="1"] { display: block; }
+  /* compact HUD for half-width split-screen views */
+  body.split .hud { --slot: 36px; }
+  body.split .hud .slot img { left: 2px; top: 2px; width: 28px; height: 28px; }
+  body.split .hud .vitals { width: 170px; bottom: 58px; left: 10px; }
+  body.split .hud .ammo { bottom: 58px; right: 10px; }
+  body.split .hud .ammoMag { font-size: 26px; }
+  body.split .hud .mats { bottom: 128px; right: 10px; }
+  body.split .hud .minimap { transform: scale(.72); transform-origin: top right; }
+  body.split .hud .matchInfo { top: 148px; width: 133px; font-size: 11px; }
+  body.split .hud .stormInfo { top: 168px; width: 133px; font-size: 10px; }
+  body.split.match .hud .killfeed { top: 190px; }
+  body.split .hud .compass { transform: scale(.8); transform-origin: top center; }
+  body.split .hud .vehicleHud { bottom: 120px; }
+  body.split .hud .itemName { bottom: 104px; }
+  .hud .p2join { position: absolute; left: 50%; top: 40%; transform: translateX(-50%); padding: 8px 14px; background: rgba(0,0,0,.6);
+    font-size: 15px; text-align: center; display: none; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div class="hud" data-player="0">
+  <div class="hurt"></div>
+  <div class="scope"></div>
+  <div class="crosshair"><b class="t"></b><b class="bm"></b><b class="l"></b><b class="r"></b><i></i></div>
+  <div class="hitmarker"></div>
+  <div class="dmgNumbers"></div>
+  <div class="killfeed"></div>
+  <div class="vitals">
+    <div class="bar shield"><i class="shieldBar"></i><span class="shieldNum">0</span></div>
+    <div class="bar"><i class="healthBar"></i><span class="healthNum">100</span></div>
+  </div>
+  <div class="ammo"><div class="ammoName"></div><span class="ammoMag">0</span><span class="ammoReserve">0</span></div>
+  <div class="progress" style="display:none"><div class="progressLabel"></div><div class="bar"><i class="progressFill"></i></div></div>
+  <div class="prompt" style="display:none"></div>
+  <div class="vehicleHud" style="display:none"></div>
+  <div class="death"><h2>ELIMINATED</h2><p class="deathBy"></p><p class="deathTimer"></p></div>
+  <div class="hotbar"></div>
+  <div class="buildbar"></div>
+  <div class="mats"></div>
+  <div class="buildHint" style="display:none"></div>
+  <div class="pieceHp" style="display:none"><div class="pieceHpText"></div><div class="bar"><i class="pieceHpFill"></i></div></div>
+  <div class="itemName"></div>
+  <div class="stormTint"></div>
+  <div class="minimap"><canvas class="minimapCanvas" width="180" height="180"></canvas></div>
+  <div class="compass"></div>
+  <div class="matchInfo"></div>
+  <div class="stormInfo"></div>
+  <div class="spectating" style="display:none"></div>
+  <div class="p2join"></div>
+</div>
+<pre id="debug"></pre>
+<div id="netBadge" style="display:none"></div>
+<div id="lobby" style="display:none"></div>
+<div id="loading"><div id="loadingText">GENERATING WORLD</div><small>building terrain on worker threads…</small><div class="lbar"><i id="loadingBar"></i></div></div>
+<div id="results"></div>
+
+<div id="screen" class="hidden">
+  <div class="panel">
+    <h2 id="screenTitle">Inventory</h2>
+    <div id="screenTop"></div>
+    <div class="inv-label">INVENTORY</div>
+    <div id="screenMain" class="grid9"></div>
+    <div id="screenHot" class="grid9"></div>
+  </div>
+</div>
+<div id="cursorStack" class="slot inner"></div>
+<div id="tooltip"></div>
+
+<div id="overlay">
+  <div class="panel menu">
+    <div class="winctl">
+      <button id="btnInstall" class="alt" hidden title="Install BLOCKFIRE as an app">INSTALL APP</button>
+      <button id="btnFullscreen" class="alt" title="Full screen (Alt/Option + Enter)">FULL SCREEN</button>
+      <button id="btnQuitApp" class="alt" hidden>QUIT</button>
+    </div>
+    <h1>BLOCKFIRE</h1>
+    <p class="sub" id="menuSub">an offline voxel battle sandbox</p>
+    <div class="tabs">
+      <button class="tab sel" data-tab="play">PLAY</button>
+      <button class="tab" data-tab="settings">SETTINGS</button>
+      <button class="tab" data-tab="controls">CONTROLS</button>
+      <button class="tab" data-tab="online">ONLINE</button>
+    </div>
+
+    <section data-tab="play">
+      <div class="modes">
+        <button class="mode" data-mode="battle"><b>SOLO VS BOTS</b><span>Island battle royale with a shrinking storm</span></button>
+        <button class="mode" data-mode="duel"><b>SPLIT-SCREEN DUEL</b><span>Player 1 keyboard + mouse, player 2 gamepad</span></button>
+        <button class="mode" data-mode="build"><b>FREE BUILD</b><span>No enemies, no storm, endless materials</span></button>
+        <button class="mode" data-mode="sandbox"><b>EXPLORE</b><span>Infinite world: mine, craft, loot, drive</span></button>
+        <button class="mode story" data-mode="story"><b>STORY</b><span>Stealth campaign: climb, hide, take down the Magistrate's men</span></button>
+      </div>
+      <label class="opt opt-battle"><span class="name">Bots</span><input type="range" id="bots" min="1" max="7" step="1"><span class="val" id="botsVal"></span></label>
+      <label class="opt opt-battle opt-duel"><span class="name">Bot difficulty</span>
+        <select id="difficulty"><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option></select></label>
+      <label class="opt opt-duel"><span class="name">Duel bots</span><input type="range" id="duelBots" min="0" max="6" step="1"><span class="val" id="duelBotsVal"></span></label>
+      <label class="opt opt-duel"><span class="name">Duel rules</span>
+        <select id="duelRespawn"><option value="0">Last one standing</option><option value="1">Respawn - first to 5 kills</option></select></label>
+      <label class="opt opt-story"><span class="name">Story</span>
+        <select id="storyNew"><option value="0">Continue</option><option value="1">Start a new story (erases the save)</option></select></label>
+      <p class="opt opt-story hint">Climb anything (W + SPACE against a wall), sneak with C, hide in hay and bushes, take enemies down
+        from behind or above with your wrist blade. M opens the map. Play it with friends from the ONLINE tab.</p>
+      <label class="opt opt-battle opt-duel opt-build opt-sandbox"><span class="name">World seed</span><input type="text" id="seed" maxlength="32" placeholder="random" spellcheck="false"></label>
+    </section>
+
+    <section data-tab="settings" hidden>
+      <label><span class="name">Render distance</span><input type="range" id="rd" min="3" max="16" step="1"><span class="val" id="rdVal"></span></label>
+      <label><span class="name">Auto distance</span><input type="checkbox" id="dynamicRd"><span class="hint">lower it when the frame rate drops</span></label>
+      <label><span class="name">Field of view</span><input type="range" id="fov" min="60" max="110" step="1"><span class="val" id="fovVal"></span></label>
+      <label><span class="name">Mouse sensitivity</span><input type="range" id="sens" min="0.2" max="3" step="0.1"><span class="val" id="sensVal"></span></label>
+      <label><span class="name">Gamepad look</span><input type="range" id="padSens" min="0.3" max="3" step="0.1"><span class="val" id="padSensVal"></span></label>
+      <label><span class="name">Volume</span><input type="range" id="volume" min="0" max="1" step="0.05"><span class="val" id="volumeVal"></span></label>
+      <label><span class="name">Story camera</span><input type="checkbox" id="thirdPersonStory"><span class="hint">third person over the shoulder in Story mode (P switches in any mode)</span></label>
+      <label><span class="name">Full screen</span><input type="checkbox" id="startFullscreen"><span class="hint">switch to full screen when a game starts (Alt/Option + Enter any time)</span></label>
+    </section>
+
+    <section data-tab="controls" hidden>
+      <div class="cols">
+        <div class="keys">
+          <b>W A S D</b><span>move</span>
+          <b>Mouse</b><span>look</span>
+          <b>Space / Shift / C</b><span>jump / sprint / crouch</span>
+          <b>Left mouse</b><span>shoot / mine / use item</span>
+          <b>Right mouse</b><span>aim / place block</span>
+          <b>R</b><span>reload</span>
+          <b>1-9 / wheel</b><span>hotbar</span>
+          <b>E</b><span>open chest, pick up weapon, enter vehicle, use table / furnace</span>
+          <b>Tab</b><span>inventory &amp; crafting</span>
+          <b>Q</b><span>build mode: Z wall, X floor, C ramp, V roof</span>
+          <b>Right mouse (build)</b><span>switch material</span>
+          <b>G</b><span>edit wall (click tiles, G to confirm)</span>
+          <b>T / hold B</b><span>box up / ramp rush</span>
+          <b>Vehicle</b><span>W/S drive, A/D steer, Space handbrake, Shift boost, F switch seat, E exit</span>
+          <b>F / N</b><span>fly / skip time (explore &amp; free build)</span>
+          <b>P</b><span>first / third-person camera</span>
+          <b>F3 / Esc</b><span>debug info / pause</span>
+          <b class="sh">STORY</b><span></span>
+          <b>W + Space</b><span>climb any wall (back + Space: jump off)</span>
+          <b>C</b><span>sneak (slower, harder to see)</span>
+          <b>Left mouse</b><span>wrist blade: takedown when unseen, from behind or from above</span>
+          <b>Sword</b><span>click: 3-cut combo; right mouse: block (just as a blow lands: parry, then finish him)</span>
+          <b>Bow</b><span>hold left mouse to draw, release to shoot; walk over arrows to pick them up</span>
+          <b>E</b><span>talk, synchronize a viewpoint, pick a lock, notice board, tear down posters, restock at a supply chest / arms crate</span>
+          <b>M</b><span>map (click a synchronized viewpoint to travel)</span>
+        </div>
+        <div class="keys">
+          <b>Left stick</b><span>move (click: sprint)</span>
+          <b>Right stick</b><span>look</span>
+          <b>RT / LT</b><span>shoot / aim (drive: gas / brake)</span>
+          <b>A</b><span>jump (drive: handbrake)</span>
+          <b>X</b><span>reload</span>
+          <b>Y</b><span>interact / enter / exit</span>
+          <b>LB / RB</b><span>previous / next slot (build: piece)</span>
+          <b>B</b><span>build mode (RT build, LT material)</span>
+          <b>D-pad up</b><span>edit wall</span>
+          <b>D-pad left / right</b><span>box up / ramp rush</span>
+          <b>D-pad down</b><span>switch seat</span>
+          <b>Right stick click</b><span>crouch</span>
+          <b>Start</b><span>pause</span>
+        </div>
+      </div>
+    </section>
+
+    <section data-tab="online" hidden>
+      <label><span class="name">Your name</span><input type="text" id="playerName" maxlength="16" spellcheck="false" placeholder="Player"></label>
+      <div class="online-box">
+        <b>HOST</b>
+        <p class="hint">Starts the mode picked on the PLAY tab as an online game (Solo vs Bots becomes an online battle with your friends;
+          Free Build and Explore are co-op). Share the room code - friends can join from anywhere.</p>
+        <button id="btnHost">HOST ONLINE GAME</button>
+      </div>
+      <div class="online-box">
+        <b>JOIN</b>
+        <label><span class="name">Room code</span><input type="text" id="roomCode" maxlength="8" spellcheck="false" placeholder="e.g. K7QXP"></label>
+        <button id="btnJoin" class="alt">JOIN GAME</button>
+      </div>
+      <p class="hint">Online play needs an internet connection: players find each other through the free PeerJS matchmaking
+        service, then play peer-to-peer. Single-player modes stay fully offline.</p>
+      <div id="netStatus"></div>
+    </section>
+
+    <div class="row">
+      <button id="btnPlay">START</button>
+      <button id="btnResume" class="alt" hidden>RESUME</button>
+      <button id="btnQuit" class="alt" hidden>QUIT TO MENU</button>
+    </div>
+    <div id="err"></div>
+  </div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="js/constants.js"></script>
+<script src="vendor/peerjs.min.js"></script>
+<script src="js/core/rng.js"></script>
+<script src="js/core/events.js"></script>
+<script src="js/world/blocks.js"></script>
+<script src="js/worker/bundle.js"></script>
+<script src="js/worker/noise.js"></script>
+<script src="js/worker/terrain.js"></script>
+<script src="js/worker/sites.js"></script>
+<script src="js/worker/mesher.js"></script>
+<script src="js/worker/entry.js"></script>
+<script src="js/world/world.js"></script>
+<script src="js/world/raycast.js"></script>
+<script src="js/items/items.js"></script>
+<script src="js/items/inventory.js"></script>
+<script src="js/items/crafting.js"></script>
+<script src="js/items/furnace.js"></script>
+<script src="js/items/mining.js"></script>
+<script src="js/combat/weapons.js"></script>
+<script src="js/combat/damage.js"></script>
+<script src="js/combat/consumables.js"></script>
+<script src="js/combat/loot.js"></script>
+<script src="js/build/building.js"></script>
+<script src="js/render/textures.js"></script>
+<script src="js/render/materials.js"></script>
+<script src="js/render/sky.js"></script>
+<script src="js/render/icons.js"></script>
+<script src="js/render/overlays.js"></script>
+<script src="js/render/models.js"></script>
+<script src="js/render/viewmodel.js"></script>
+<script src="js/render/effects.js"></script>
+<script src="js/render/build-ghost.js"></script>
+<script src="js/render/vehicle-model.js"></script>
+<script src="js/input/input.js"></script>
+<script src="js/input/controllers.js"></script>
+<script src="js/input/gamepad.js"></script>
+<script src="js/entities/entity.js"></script>
+<script src="js/entities/interaction.js"></script>
+<script src="js/entities/character.js"></script>
+<script src="js/entities/item-drop.js"></script>
+<script src="js/entities/projectile.js"></script>
+<script src="js/entities/vehicle.js"></script>
+<script src="js/ai/bot.js"></script>
+<script src="js/match/storm.js"></script>
+<script src="js/match/match.js"></script>
+<script src="js/story/plan.js"></script>
+<script src="js/story/smoke.js"></script>
+<script src="js/story/stealth.js"></script>
+<script src="js/story/nav.js"></script>
+<script src="js/story/npc.js"></script>
+<script src="js/story/blade.js"></script>
+<script src="js/story/poster.js"></script>
+<script src="js/story/missions.js"></script>
+<script src="js/story/story.js"></script>
+<script src="js/story/mirror.js"></script>
+<script src="js/core/game.js"></script>
+<script src="js/ui/app-shell.js"></script>
+<script src="js/ui/menu.js"></script>
+<script src="js/ui/hotbar.js"></script>
+<script src="js/ui/screen-session.js"></script>
+<script src="js/ui/inventory-ui.js"></script>
+<script src="js/ui/combat-hud.js"></script>
+<script src="js/ui/build-hud.js"></script>
+<script src="js/ui/vehicle-hud.js"></script>
+<script src="js/ui/match-hud.js"></script>
+<script src="js/ui/story-hud.js"></script>
+<script src="js/ui/story-screens.js"></script>
+<script src="js/ui/player-view.js"></script>
+<script src="js/audio/audio.js"></script>
+<script src="js/net/transport.js"></script>
+<script src="js/net/protocol.js"></script>
+<script src="js/net/host.js"></script>
+<script src="js/net/client.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

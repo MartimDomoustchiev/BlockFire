@@ -1,0 +1,12 @@
+# Built by ./mac/build.sh from the files here - rebuild it, don't commit it
+BLOCKFIRE.app/
+
+# Screenshots written by the tests (node tests/run.js)
+tests/output/
+
+# macOS Finder metadata
+.DS_Store
+
+# Tooling
+node_modules/
+*.log

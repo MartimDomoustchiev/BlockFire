@@ -1,0 +1,749 @@
+/* ============================================================
+ * Boot + main loop. Wires renderer, Game, local players (one or two
+ * PlayerViews), menus, audio and the inventory screen.
+ *
+ * The simulation runs in fixed 1/60 s ticks via an accumulator
+ * (at most CONFIG.MAX_CATCHUP_TICKS per frame); every view is drawn
+ * once per animation frame after ticking. Split-screen draws two
+ * views side by side with scissored viewports.
+ *
+ * Modes: battle (solo vs bots), duel (split-screen, P2 on a gamepad),
+ * build (free build), sandbox (explore an infinite world).
+ *
+ * Debug URL params (handy for testing without a mouse):
+ *   ?autostart=1   skip the menu and don't need pointer lock
+ *   ?mode=battle|duel|build|sandbox  &bots=5  &difficulty=easy|normal|hard  ?seed=abc  ?rd=8
+ *   ?up=20 &pitch=-25 &yaw=30   (sandbox) start flying 'up' blocks above the spawn
+ *   ?kit=1  ?dummies=N  ?arena=1  ?vehicles=1   (sandbox) test kits, training dummies, vehicles
+ *   ?host=1 / ?join=CODE  &name=Bob  &net=bridge   online host / join (bridge = test transport)
+ * ============================================================ */
+(function () {
+  const params = new URLSearchParams(location.search);
+  const AUTOSTART = params.has('autostart');
+
+  const settings = loadSettings();
+  AppShell.init();
+  /** Starting a game from the menu (a click: browsers allow full screen then). */
+  const gameStarting = () => { if (settings.startFullscreen) AppShell.toggleFullscreen(true); };
+  if (params.has('seed')) settings.seed = params.get('seed');
+  if (params.has('rd')) settings.renderDistance = Math.max(CONFIG.RENDER_DISTANCE.MIN, Math.min(CONFIG.RENDER_DISTANCE.MAX, +params.get('rd')));
+  if (params.has('rd')) settings.dynamicRd = false;
+  if (params.has('tp')) settings.thirdPersonStory = settings.thirdPerson = params.get('tp') === '1';
+  if (AUTOSTART) settings.mode = params.get('mode') || 'sandbox';
+  if (params.has('bots')) { settings.bots = +params.get('bots'); settings.duelBots = +params.get('bots'); }
+  if (params.has('difficulty')) settings.difficulty = params.get('difficulty');
+
+  const canvas = document.getElementById('gl');
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  } catch (e) {
+    document.getElementById('err').style.display = 'block';
+    document.getElementById('err').textContent = 'WebGL is not available in this browser: ' + e.message;
+    return;
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.autoClear = false;            // each view clears its own rectangle; the viewmodel draws on top
+  renderer.info.autoReset = false;       // count every pass in the debug panel
+  const scene = new THREE.Scene();
+
+  const atlas = buildAtlasTexture();
+  const materials = createChunkMaterials(atlas);
+  Icons.init(atlas.image);
+  DropVisuals.init(atlas);
+  const input = new Input(canvas);
+  const kbm = new KeyboardMouseController(input, settings);
+  const pad = new GamepadController(settings, 0);
+  const sky = new Sky(scene, new THREE.Object3D());
+  const menu = new Menu(settings, onSettingChanged);
+  const effects = new Effects(scene, atlas.image);
+  const stormVisual = new StormVisual(scene);
+
+  // two HUD roots (the second is a clone of the first, shown in split-screen)
+  const hudRoot1 = document.querySelector('.hud[data-player="0"]');
+  const hudRoot2 = hudRoot1.cloneNode(true);
+  hudRoot2.dataset.player = '1';
+  hudRoot1.after(hudRoot2);
+  const views = [new PlayerView(0, hudRoot1, { scene, atlas }), new PlayerView(1, hudRoot2, { scene, atlas })];
+  let active = [views[0]];
+
+  let game = null;
+  let state = 'menu';            // menu | loading | playing
+  let spawnReady = false;
+  let accumulator = 0;
+  let resultsAt = Infinity, resultsShown = false;
+  let fps = 0, frames = 0, fpsClock = performance.now(), debugClock = 0;
+  let effectiveRd = settings.renderDistance, rdLow = 0, rdHigh = 0;
+  // online play (js/net): role 'local' | 'host' | 'client'
+  let net = null, netRole = 'local', roomCode = null, lobby = false, currentMode = null;
+
+  const ui = new InventoryUI({ input, getGame: () => game });
+  window.__ui = ui;              // tests
+  // story mode screens (map, notice board, shop); choices run on the Story here, or go to the host online
+  const storyAct = (a) => {
+    if (!game || !game.story) return;
+    if (netRole === 'client') { if (net) net.sendUi(Object.assign({ op: 'story' }, a)); }
+    else game.story.act(game.player, a);
+  };
+  const screens = new StoryScreens({ input, getGame: () => game, getMap: () => ({ img: views[0].match.mapImg, R: views[0].match.mapR }), act: storyAct });
+  window.__screens = screens;
+  window.__views = views;        // tests
+  const uiOpen = () => ui.isOpen || screens.isOpen;
+  ui.canOpen = () => state === 'playing' && isActive() && game && game.player && game.player.alive && !game.player.vehicle && !screens.isOpen;
+
+  // ---- settings ------------------------------------------------------
+  function setFog(underwater) {
+    const far = underwater ? 20 : effectiveRd * CONFIG.CHUNK_SIZE * CONFIG.FOG.FAR_FRACTION;
+    materials.shared.uFogFar.value = far;
+    materials.shared.uFogNear.value = underwater ? 0.5 : far * CONFIG.FOG.NEAR_FRACTION;
+  }
+  function applyDistance() {
+    for (const v of views) { v.camera.far = effectiveRd * CONFIG.CHUNK_SIZE + 48; v.camera.updateProjectionMatrix(); }
+    if (game) game.world.setRenderDistance(effectiveRd);
+  }
+  function onSettingChanged(key) {
+    if (key === 'renderDistance' || key === 'dynamicRd') { effectiveRd = settings.renderDistance; applyDistance(); }
+    if (key === 'volume') Sound.setVolume(settings.volume);
+  }
+  function layout() {
+    const W = window.innerWidth, H = window.innerHeight;
+    renderer.setSize(W, H, false);
+    if (active.length === 2) {
+      views[0].setRect(0, 0, Math.floor(W / 2), H);
+      views[1].setRect(Math.floor(W / 2), 0, W - Math.floor(W / 2), H);
+    } else views[0].setRect(0, 0, W, H);
+    document.body.classList.toggle('split', active.length === 2);
+  }
+  window.addEventListener('resize', layout);
+  layout(); applyDistance();
+  Sound.setVolume(settings.volume);
+
+  // ---- helpers for debug setups ----------------------------------------
+  function giveKit(ch) {
+    const kit = [['wood_pickaxe', 1], ['stone_pickaxe', 1], ['iron_pickaxe', 1], ['stone_axe', 1], ['stone_shovel', 1],
+      ['log', 32], ['planks', 64], ['stone', 64], ['iron_ore', 8], ['gold_ore', 4], ['sand', 8],
+      ['crafting_table', 1], ['furnace', 1], ['iron_ingot', 4], ['glass', 16], ['brick', 32]];
+    for (const [id, n] of kit) ch.inventory.add(makeStack(id, n));
+  }
+
+  /** First free y above open ground at a column; null if unloaded, under a tree or in water. */
+  function groundY(x, z) {
+    for (let y = CONFIG.CHUNK_HEIGHT - 2; y > 0; y--) {
+      const b = game.world.getBlock(x, y, z);
+      if (b < 0) return null;
+      if (b === BLOCK.LEAVES || b === BLOCK.WOOD || b === BLOCK.WATER) return null;
+      if (BlockTables.solid[b]) return y + 1;
+    }
+    return null;
+  }
+
+  function spawnDummies(n) {
+    const p = game.player;
+    for (let i = 0; i < n; i++) {
+      const ang = p.yaw + (i - (n - 1) / 2) * 0.35, dist = 9 + (i % 3) * 4;
+      let x = 0, z = 0, y = null;
+      for (let tries = 0; tries < 12 && y === null; tries++) {
+        const dd = dist + tries * 1.5, aa = ang + (tries % 2 ? 0.15 : -0.15) * tries;
+        x = Math.floor(p.pos.x - Math.sin(aa) * dd); z = Math.floor(p.pos.z - Math.cos(aa) * dd);
+        y = groundY(x, z);
+      }
+      if (y === null) continue;
+      const d = new Character({ name: 'Dummy ' + (i + 1), controller: new DummyController(i % 2 === 1, i), team: 0 });
+      game.addEntity(d);
+      d.teleport(x + 0.5, y, z + 0.5);
+      d.yaw = p.yaw + Math.PI;
+      d.home = new THREE.Vector3(x + 0.5, y, z + 0.5);
+      d.respawnDelay = CONFIG.DUMMY.RESPAWN;
+      if (i % 3 === 2) d.shield = 50;
+    }
+  }
+
+  /** One of each vehicle near the player (boat at the closest water) plus fuel barrels. */
+  function spawnVehicles() {
+    const p = game.player, out = [];
+    const place = (kind, ang, dist) => {
+      for (let tries = 0; tries < 16; tries++) {
+        const a = p.yaw + ang + tries * 0.4, d = dist + tries;
+        const x = Math.floor(p.pos.x - Math.sin(a) * d), z = Math.floor(p.pos.z - Math.cos(a) * d);
+        const y = groundY(x, z);
+        if (y === null) continue;
+        let flat = true;
+        for (const [ox, oz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) { const yy = groundY(x + ox, z + oz); if (yy === null || Math.abs(yy - y) > 1) flat = false; }
+        if (!flat) continue;
+        const v = game.addEntity(new Vehicle(kind));
+        v.pos.set(x + 0.5, y, z + 0.5); v.yaw = p.yaw + Math.PI / 2;
+        out.push(v);
+        return v;
+      }
+      return null;
+    };
+    place('car', 0.6, 7); place('sports', -0.6, 8); place('truck', Math.PI * 0.85, 9);
+    const car = out[0];
+    if (car) for (let i = 0; i < 2; i++) {
+      const b = game.addEntity(new FuelBarrel());
+      const y = groundY(Math.floor(car.pos.x + 3 + i), Math.floor(car.pos.z + 2)) ?? car.pos.y;
+      b.pos.set(Math.floor(car.pos.x + 3 + i) + 0.5, y, Math.floor(car.pos.z + 2) + 0.5);
+    }
+    let best = null;
+    for (let r = 4; r < 80 && !best; r += 2) {
+      for (let k = 0; k < 24 && !best; k++) {
+        const a = k / 24 * Math.PI * 2, x = Math.floor(p.pos.x + Math.cos(a) * r), z = Math.floor(p.pos.z + Math.sin(a) * r);
+        const w = game.world;
+        if (w.getBlock(x, CONFIG.SEA_LEVEL, z) === BLOCK.WATER && w.getBlock(x, CONFIG.SEA_LEVEL - 1, z) === BLOCK.WATER &&
+            w.getBlock(x + 2, CONFIG.SEA_LEVEL, z) === BLOCK.WATER && w.getBlock(x - 2, CONFIG.SEA_LEVEL, z) === BLOCK.WATER) best = [x, z];
+      }
+    }
+    if (best) { const b = game.addEntity(new Vehicle('boat')); b.pos.set(best[0] + 0.5, CONFIG.SEA_LEVEL + 1 - 0.15, best[1] + 0.5); }
+  }
+
+  function setupArena() {
+    const p = game.player, inv = p.inventory;
+    inv.clear();
+    Object.keys(CONFIG.WEAPONS).slice(0, 5).forEach((cls, i) => inv.set(i, makeWeapon(cls, i)));
+    inv.set(5, makeStack('bandage', 10)); inv.set(6, makeStack('medkit', 2)); inv.set(7, makeStack('shield_potion', 3));
+    inv.set(8, makeStack('planks', 64));
+    inv.add(makeStack('planks', 128)); inv.add(makeStack('stone', 96)); inv.add(makeStack('iron_ingot', 30));
+    for (const id of Object.keys(CONFIG.LOOT.AMMO_WITH_WEAPON)) inv.add(makeStack(id, CONFIG.LOOT.AMMO_WITH_WEAPON[id] * 3));
+    [['rocket', 4], ['sniper', 3], ['shotgun', 2], ['smg', 1], ['ar', 0]].forEach(([cls, r], i) => {
+      const a = p.yaw + Math.PI + (i - 2) * 0.5, x = p.pos.x - Math.sin(a) * 3.5, z = p.pos.z - Math.cos(a) * 3.5;
+      const y = groundY(Math.floor(x), Math.floor(z));
+      if (y === null) return;
+      const d = game.addEntity(new ItemDrop(makeWeapon(cls, r), x, y + 0.2, z));
+      d.persistent = true;
+    });
+    spawnDummies(4);
+  }
+
+  /** Free build: a hotbar of building blocks that never run out. */
+  function giveBuildKit(ch) {
+    ['stone', 'brick', 'planks', 'glass', 'build_wood', 'build_stone', 'build_metal', 'log', 'sand'].forEach((id, i) => ch.inventory.set(i, makeStack(id, 64)));
+    ch.inventory.add(makeStack('iron_pickaxe'));
+    ch.inventory.add(makeWeapon('rocket', 4));
+    ch.inventory.add(makeStack('ammo_rockets', 99));
+  }
+
+  /** A random dry spot on the island (online lobby / joiners), or the world spawn. */
+  function spawnSpotFor() {
+    if (game.rules.story) {
+      const s = game.story ? game.story.respawnPoint() : new THREE.Vector3(0.5, CONFIG.CHUNK_HEIGHT - 2, 0.5);
+      return { x: s.x + (Math.random() - 0.5) * 2, y: s.y, z: s.z + (Math.random() - 0.5) * 2 };
+    }
+    if (!game.rules.island) {
+      const s = game.spawnPoint;
+      return { x: s.x + (Math.random() - 0.5) * 3, y: s.y + 0.5, z: s.z + (Math.random() - 0.5) * 3 };
+    }
+    for (let i = 0; i < 200; i++) {
+      const a = Math.random() * Math.PI * 2, d = Math.random() * CONFIG.ISLAND.RADIUS * 0.35;
+      const x = Math.floor(Math.cos(a) * d), z = Math.floor(Math.sin(a) * d), y = groundY(x, z);
+      if (y !== null) return { x: x + 0.5, y: y + 0.01, z: z + 0.5 };
+    }
+    return { x: 0.5, y: CONFIG.ISLAND.DROP_HEIGHT, z: 0.5 };
+  }
+
+  // ---- world lifecycle ----------------------------------------------
+  function startWorld(modeOverride) {
+    if (game) quitGame(true);
+    menu.showError('');
+    resultsAt = Infinity; resultsShown = false;
+    lobby = false;
+    // split-screen duel is local only: an online host plays it as solo vs bots
+    const mode = modeOverride || (netRole === 'host' && settings.mode === 'duel' ? 'battle' : settings.mode);
+    const raw = mode === 'story' ? (params.get('seed') || CONFIG.STORY.SEED) : settings.seed.trim();   // the story has its own island
+    const seed = raw === '' ? (Math.random() * 0x7fffffff) | 0 : hashSeed(raw);
+    currentMode = mode;
+    effectiveRd = settings.renderDistance;
+    game = new Game({ scene, materials, seed, mode, renderDistance: effectiveRd });
+    if (mode === 'duel') game.rules.respawn = settings.duelRespawn === 1;
+    applyDistance();
+
+    const p1 = new Character({ name: mode === 'duel' ? 'Player 1' : netRole === 'host' ? (settings.playerName || 'Host') : 'You', controller: kbm, isLocal: true });
+    p1.localIndex = 0;
+    game.addEntity(p1);
+    game.player = p1;
+    const humans = [p1];
+    active = [views[0]];
+    if (mode === 'duel') {
+      const p2 = new Character({ name: 'Player 2', controller: pad, isLocal: true });
+      p2.localIndex = 1;
+      game.addEntity(p2);
+      game.player2 = p2;
+      humans.push(p2);
+      active = [views[0], views[1]];
+    }
+    layout();
+    active.forEach((v, i) => v.attach(game, humans[i]));
+    kbm.flush(); pad.flush();
+    effects.attach(game, p1);
+    Sound.attach(game, active.map((v) => ({ camera: v.camera, character: v.character })));
+    game.events.on('openBlockUI', (e) => {
+      if (e.character === game.player) ui.open(e.character, e.kind, { x: e.x, y: e.y, z: e.z });
+    });
+    hookStoryScreens(game);
+    game.events.on('matchEnd', () => { resultsAt = Math.min(resultsAt, game.time + CONFIG.MATCH.END_DELAY); });
+    game.events.on('kill', (e) => {
+      // no respawn: the match is over for you once every local player has fallen
+      if (!game.match || game.rules.respawn || !humans.includes(e.victim)) return;
+      if (humans.every((h) => !h.alive)) resultsAt = Math.min(resultsAt, game.time + CONFIG.MATCH.END_DELAY);
+    });
+    spawnReady = false;
+    accumulator = 0;
+    state = 'loading';
+    window.__game = game;      // for console debugging and tests
+    if (netRole === 'host') net.attach(game);
+    if (game.rules.story) {
+      // story: generate the whole island and ask the workers where its villages and camps are
+      game.world.preload(game.islandRadius);
+      for (const h of humans) h.teleport(0.5, CONFIG.CHUNK_HEIGHT - 2, 0.5);
+      game.matchHumans = humans;
+      const g = game;
+      game.world.requestPlan((plan) => { g.storyPlan = plan; });
+      spawnReady = true;
+      return;
+    }
+    if (game.rules.island) {
+      // island match: generate the whole island first, then everyone drops in
+      game.world.preload(CONFIG.ISLAND.RADIUS);
+      for (const h of humans) h.teleport(0.5, CONFIG.ISLAND.DROP_HEIGHT, 0.5);
+      game.matchHumans = humans;
+      spawnReady = true;
+      return;
+    }
+    game.world.requestSpawn((s) => {
+      p1.teleport(s.x, s.y + 0.01, s.z);
+      game.spawnPoint.set(s.x, s.y + 0.01, s.z);
+      if (mode === 'build') giveBuildKit(p1);
+      if (params.has('up')) { p1.flying = true; p1.pos.y += +params.get('up'); }
+      if (params.has('pitch')) p1.pitch = +params.get('pitch') * Math.PI / 180;
+      if (params.has('yaw')) p1.yaw = +params.get('yaw') * Math.PI / 180;
+      if (params.has('kit')) giveKit(p1);
+      spawnReady = true;
+    });
+  }
+
+  /** keepNet: replacing the game (play again / host restart) without leaving the online session. */
+  function quitGame(keepNet) {
+    if (!keepNet) leaveNet();
+    ui.close(false);
+    if (game) game.dispose();
+    game = null;
+    window.__game = null;
+    for (const v of views) v.detach();
+    Sound.stopLoops();
+    stormVisual.update(null);
+    document.body.classList.remove('match');
+    views[0].match.hideResults();
+  }
+
+  function leaveNet() {
+    if (net) net.close();
+    net = null; netRole = 'local'; roomCode = null; lobby = false;
+    ui.net = null;
+    document.getElementById('netBadge').style.display = 'none';
+    document.getElementById('lobby').style.display = 'none';
+  }
+
+  // ---- online: host -------------------------------------------------
+  function hostGame(retry = 0) {
+    Sound.init();
+    if (game) quitGame();
+    leaveNet();
+    roomCode = makeRoomCode();
+    const t = createTransport('host', roomCode);
+    netRole = 'host';
+    net = new NetHost(t, roomCode, { spawnSpot: () => spawnSpotFor(), giveBuildKit, peersChanged: () => {} });
+    menu.netStatus('Opening room ' + roomCode + '...');
+    t.onOpen(() => menu.netStatus('Room ' + roomCode + ' is open - share the code with your friends.'));
+    t.onError((e) => {
+      if (e === 'room-taken' && retry < 3) { hostGame(retry + 1); return; }
+      menu.netStatus(e === 'room-taken' ? 'Could not open a room, try again.' : e);
+    });
+    startWorld();
+    startHeartbeat();
+    input.lock();
+  }
+
+  /** Host: everyone in the lobby drops into the match. */
+  function startOnlineMatch() {
+    if (!game || game.match || !lobby) return;
+    lobby = false;
+    game.match = new Match(game, { bots: Math.max(0, settings.bots), difficulty: settings.difficulty, respawn: false });
+    const humans = [game.player].concat(net.remoteCharacters());
+    game.match.start(humans);
+  }
+
+  // ---- online: join -------------------------------------------------
+  function joinGame(code) {
+    if (!code) { menu.netStatus('Enter the room code your friend gave you.'); return; }
+    Sound.init();
+    if (game) quitGame();
+    leaveNet();
+    roomCode = code;
+    netRole = 'client';
+    menu.netStatus('Connecting to room ' + code + '...');
+    net = new NetClient(createTransport('client', code), settings.playerName || 'Player', {
+      welcome: (m) => startReplica(m),
+      restart: () => { resultsShown = false; views[0].match.hideResults(); },
+      results: (r, winner) => {
+        resultsShown = true;
+        input.unlock();
+        views[0].match.showResults(Object.assign({}, r, winner && !r.won ? { title: winner.toUpperCase() + ' WINS' } : {}), game);
+        const again = document.getElementById('btnAgain');
+        if (again) { again.textContent = 'WAITING FOR HOST'; again.disabled = true; }
+      },
+      screen: (sc) => { if (game && game.player) ui.showRemote(game.player, sc); },
+      closed: (reason) => {
+        const r = reason;
+        if (game) { quitGame(); state = 'menu'; active = [views[0]]; layout(); }
+        leaveNet();
+        menu.netStatus(r);
+        input.unlock();
+      },
+      status: (s) => menu.netStatus(s),
+    });
+    ui.net = { send: (op) => net && net.sendUi(op) };
+    startHeartbeat();
+    input.lock();
+  }
+
+  /** Client: builds the local copy of the host's world. */
+  function startReplica(m) {
+    if (game) quitGame(true);
+    resultsAt = Infinity; resultsShown = false;
+    views[0].match.hideResults();
+    effectiveRd = settings.renderDistance;
+    game = new Game({ scene, materials, seed: m.seed, mode: m.mode, renderDistance: effectiveRd, replica: true });
+    game.rules.respawn = !!m.respawn;
+    game._nextId = 1e9;
+    game.timeOfDay = m.tod;
+    applyDistance();
+    const me = new Character({ name: settings.playerName || 'Player', controller: new RecordingController(kbm, (it) => net && net.queueIntent(it)), isLocal: true });
+    me.id = m.id;
+    me.netPredicted = true;
+    me.localIndex = 0;
+    game.addEntity(me);
+    game.player = me;
+    active = [views[0]];
+    layout();
+    views[0].attach(game, me);
+    kbm.flush();
+    effects.attach(game, me);
+    Sound.attach(game, [{ camera: views[0].camera, character: me }]);
+    state = 'loading';
+    spawnReady = true;
+    accumulator = 0;
+    window.__game = game;
+    hookStoryScreens(game);
+    if (game.rules.island) game.world.preload(game.islandRadius || CONFIG.ISLAND.RADIUS);
+    if (game.rules.story) {
+      // the same island from the same seed: our own workers know where everything is
+      const g = game;
+      game.world.requestPlan((plan) => {
+        if (game !== g || !plan) return;
+        new StoryMirror(g, plan);
+        if (net && net.pendingSty) g.story.apply(net.pendingSty);
+      });
+    }
+    document.body.classList.toggle('match', !!game.rules.island);
+    menu.netStatus('Joined room ' + roomCode + '.');
+    return { game, me };
+  }
+
+  /** Story screens open when the story asks for one for this machine's player. */
+  function hookStoryScreens(g) {
+    g.events.on('storyScreen', (e) => { if (e.character && e.character === g.player && !uiOpen()) screens.open(e.screen, e); });
+  }
+
+  function quitToMenu() {
+    quitGame();
+    state = 'menu';
+    resultsShown = false;
+    active = [views[0]];
+    layout();
+  }
+
+  function showResults() {
+    resultsShown = true;
+    input.unlock();
+    const m = game.match;
+    if (game.player2) {
+      const r1 = m.results(game.player), r2 = m.results(game.player2), w = m.winner;
+      const title = w === game.player ? 'PLAYER 1 WINS' : w === game.player2 ? 'PLAYER 2 WINS' : w ? w.name.toUpperCase() + ' WINS' : 'DRAW';
+      views[0].match.showResults(Object.assign({}, r1, { title, versus: r2 }), game);
+    } else views[0].match.showResults(m.results(game.player), game);
+  }
+
+  // ---- UI wiring -----------------------------------------------------
+  function isActive() { return !!game && (input.locked || AUTOSTART); }
+
+  menu.el.play.addEventListener('click', () => {
+    Sound.init();
+    gameStarting();
+    const fresh = document.getElementById('storyNew');
+    if (settings.mode === 'story' && fresh && fresh.value === '1') { Story.clearSave(); fresh.value = '0'; menu.syncStorySave(); }
+    if (netRole === 'client') { quitGame(); menu.netStatus(''); }     // leaves the friend's room
+    startWorld();
+    input.lock();
+  });
+  menu.el.resume.addEventListener('click', () => { Sound.init(); input.lock(); });
+  menu.el.quit.addEventListener('click', () => quitToMenu());
+  menu.onHost = () => { gameStarting(); hostGame(); };
+  menu.onJoin = (code) => { gameStarting(); joinGame(code); };
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Enter' && netRole === 'host' && lobby && state === 'playing' && !ui.isOpen) startOnlineMatch();
+    if (e.code === 'KeyM' && !e.defaultPrevented && game && game.story && state === 'playing' && !uiOpen() && isActive() && game.player.alive) { e.preventDefault(); screens.open('map'); }
+    if (e.code === 'KeyP' && !e.repeat && game && state === 'playing' && !uiOpen() && isActive() && !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) {
+      // first / third-person camera (remembered separately for Story mode and the rest)
+      const k = game.story ? 'thirdPersonStory' : 'thirdPerson';
+      settings[k] = !settings[k];
+      saveSettings(settings);
+      if (menu.el.thirdPersonStory) menu.el.thirdPersonStory.checked = settings.thirdPersonStory;
+    }
+  });
+  canvas.addEventListener('click', () => { if (game && state !== 'menu' && !uiOpen() && !resultsShown) { Sound.init(); input.lock(); } });
+  window.addEventListener('keydown', (e) => { if (e.code === 'F3') menu.toggleDebug(); });
+  for (const v of views) {
+    v.match.onPlayAgain = () => {
+      if (netRole === 'client') return;                          // only the host can restart an online game
+      Sound.init(); startWorld(netRole === 'host' ? currentMode : undefined); input.lock();
+    };
+    v.match.onMenu = () => quitToMenu();
+  }
+
+  // ---- dynamic render distance ---------------------------------------
+  function adaptDistance(dt) {
+    if (!settings.dynamicRd || !game || state !== 'playing') return;
+    if (fps && fps < 45) { rdLow += dt; rdHigh = 0; } else if (fps >= 57) { rdHigh += dt; rdLow = 0; } else { rdLow = rdHigh = 0; }
+    if (rdLow > 2 && effectiveRd > Math.max(CONFIG.RENDER_DISTANCE.MIN, 4)) { effectiveRd--; rdLow = 0; applyDistance(); }
+    if (rdHigh > 6 && effectiveRd < settings.renderDistance) { effectiveRd++; rdHigh = 0; applyDistance(); }
+  }
+
+  // ---- main loop -----------------------------------------------------
+  const STEP = 1 / CONFIG.SIM_HZ;
+  let last = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const frameDt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    lastFrameAt = performance.now();
+    if (net) net.keepAlive();
+
+    pad.poll();
+    if (pad.takeStart() && game && state === 'playing' && !resultsShown) {
+      if (input.locked) input.unlock(); else input.lock();
+    }
+    const act = isActive();
+    const online = netRole !== 'local';
+    kbm.enabled = act && !uiOpen();
+    menu.showOverlay(!act && !uiOpen() && !resultsShown && state !== 'loading', !!game);
+    const islandLoad = game && game.rules.island && state === 'loading';
+    menu.showLoading(state === 'loading', islandLoad ? 'GENERATING ISLAND' : 'GENERATING WORLD', islandLoad ? game.world.preloadProgress() : 0);
+    // online games never pause: the world keeps going for everyone else
+    const playing = state === 'playing' && (act || uiOpen() || online);
+    for (const v of views) if (!active.includes(v) || !game) v.setHudVisible(false, false);
+
+    if (game) {
+      // stream chunks around what each view shows (the player, or who they spectate)
+      const eyes = active.map((v) => v.spectate || v.character).filter(Boolean);
+      game.world.update(spawnReady ? eyes.map((h) => h.pos) : [{ x: 0, z: 0 }], remoteEyes());
+      if (game.world.error) menu.showError(game.world.error);
+
+      if (state === 'loading' && netRole === 'client') {
+        const ready = net && net.tpAck > 0 && (game.rules.island ? game.world.preloadProgress() >= 1
+          : game.world.isAreaMeshed(Math.floor(game.player.pos.x / 16), Math.floor(game.player.pos.z / 16), 1));
+        if (ready) {
+          if (game.rules.island) { views[0].match.buildMap(game, effects.tileColors); }
+          state = 'playing';
+          kbm.flush();
+          input.takeFrame();
+        }
+      } else if (state === 'loading' && game.rules.story) {
+        // story: island generated + plan known -> players to the hideout; play once it's meshed around them
+        if (!game.story && game.storyPlan && game.world.preloadProgress() >= 1) {
+          new Story(game, game.storyPlan);
+          game.story.start(game.matchHumans.concat(netRole === 'host' && net ? net.remoteCharacters() : []));
+          views[0].match.buildMap(game, effects.tileColors);
+          document.body.classList.add('match');
+        } else if (game.story && game.world.isAreaMeshed(Math.floor(game.player.pos.x / 16), Math.floor(game.player.pos.z / 16), 2)) {
+          state = 'playing';
+          kbm.flush();
+          input.takeFrame();
+        }
+      } else if (state === 'loading' && netRole === 'host' && game.rules.island && game.world.preloadProgress() >= 1) {
+        // online battle: wait in a lobby on the island until the host starts the match
+        views[0].match.buildMap(game, effects.tileColors);
+        const s = spawnSpotFor();
+        game.player.teleport(s.x, s.y, s.z);
+        for (const c of net.remoteCharacters()) { const t = spawnSpotFor(); c.teleport(t.x, t.y, t.z); }
+        lobby = true;
+        document.body.classList.add('match');
+        state = 'playing';
+        kbm.flush();
+        input.takeFrame();
+      } else if (state === 'loading' && game.rules.island && game.world.preloadProgress() >= 1) {
+        views[0].match.buildMap(game, effects.tileColors);
+        views[1].match.mapImg = views[0].match.mapImg;
+        views[1].match.mapR = views[0].match.mapR;
+        const duel = game.mode === 'duel';
+        game.match = new Match(game, {
+          bots: duel ? settings.duelBots : Math.max(1, settings.bots), difficulty: settings.difficulty,
+          respawn: game.rules.respawn, killTarget: duel && game.rules.respawn ? 5 : 0,
+        });
+        game.match.start(game.matchHumans);
+        document.body.classList.add('match');
+        state = 'playing';
+        kbm.flush(); pad.flush();
+        input.takeFrame();
+      } else if (state === 'loading' && !game.rules.island && spawnReady &&
+          game.world.isAreaMeshed(Math.floor(game.player.pos.x / 16), Math.floor(game.player.pos.z / 16), 2)) {
+        state = 'playing';
+        kbm.flush();
+        input.takeFrame();
+        if (game.mode === 'sandbox') {
+          if (params.has('arena')) setupArena();
+          else if (params.has('dummies')) spawnDummies(Math.min(12, +params.get('dummies') || 3));
+          if (params.has('vehicles')) spawnVehicles();
+        }
+      }
+      if (playing && !game.paused) {          // game.paused: tests step the sim by hand
+        if (act || uiOpen()) kbm.poll(); else input.takeFrame();
+        accumulator += frameDt;
+        let n = 0;
+        while (accumulator >= STEP && n < CONFIG.MAX_CATCHUP_TICKS) { game.tick(STEP); accumulator -= STEP; n++; }
+        if (n === CONFIG.MAX_CATCHUP_TICKS) accumulator = 0;          // too slow: drop time instead of spiralling
+      } else {
+        input.takeFrame();                                             // ignore input while paused/loading
+        pad.flush();
+      }
+      game.lightColor = materials.shared.uLight.value;
+      game.render(frameDt);
+      for (const v of active) {
+        v.update(game, frameDt, {
+          settings, playing: state === 'playing', uiOpen: uiOpen() && v.index === 0, active: act,
+          controller: v.index === 0 ? kbm : pad,
+        });
+      }
+      if (active[1]) {
+        views[1].p2join.style.display = pad.connected ? 'none' : 'block';
+        if (!pad.connected) views[1].p2join.textContent = 'Player 2: connect a gamepad and press any button';
+      }
+      if (net && state !== 'loading') net.update(frameDt);
+      updateNetUi();
+      ui.update();
+      screens.update();
+      stormVisual.update(game);
+      if (!resultsShown && game.match && game.time >= resultsAt) showResults();
+      adaptDistance(frameDt);
+      Sound.update(frameDt, game);
+    }
+
+    // ---- draw every active view ----
+    const light = materials.shared.uLight.value;
+    DropVisuals.tint(light);
+    effects.update(frameDt, views[0].camera, light);
+    if (game) CharacterModel.setLight(game, light);
+    renderer.info.reset();
+    renderer.setScissorTest(false);
+    renderer.clear();
+    renderer.setScissorTest(true);
+    for (const v of active) {
+      const eyes = v.spectate || v.character;
+      const underwater = !!game && !!eyes && eyes.headInWater && state === 'playing' && !v.spectate;
+      setFog(underwater);
+      sky.camera = v.camera;
+      sky.update(game ? game.timeOfDay : CONFIG.TIME.START, materials.shared, underwater);
+      v.viewmodel.light.copy(materials.shared.uLight.value);
+      v.render(renderer, scene);
+    }
+    renderer.setScissorTest(false);
+
+    frames++;
+    if (now - fpsClock >= 500) { fps = Math.round(frames * 1000 / (now - fpsClock)); frames = 0; fpsClock = now; }
+    if (now - debugClock > 250) { debugClock = now; updateDebug(); }
+  }
+
+  /** Room badge + battle lobby panel. */
+  function updateNetUi() {
+    const badge = document.getElementById('netBadge'), lob = document.getElementById('lobby');
+    if (!net || !game) { badge.style.display = 'none'; lob.style.display = 'none'; return; }
+    badge.style.display = 'block';
+    badge.textContent = netRole === 'host'
+      ? 'ONLINE  -  ROOM ' + roomCode + '  -  ' + net.playerCount() + ' PLAYER' + (net.playerCount() > 1 ? 'S' : '')
+      : 'ONLINE  -  ROOM ' + roomCode + '  -  ' + Math.round(net.rtt * 1000) + ' ms';
+    const inLobby = netRole === 'host' ? lobby : !!(game.match && game.match.lobby);
+    lob.style.display = inLobby && state === 'playing' ? 'block' : 'none';
+    if (!inLobby) return;
+    const names = netRole === 'host' ? [game.player.name + ' (host)'].concat(net.names()) : game.match.lobby;
+    lob.innerHTML = '<h3>WAITING ROOM</h3><div class="code">' + esc(roomCode) + '</div>' +
+      '<div class="who">' + names.map(esc).join(' &middot; ') + '</div>' +
+      '<div class="go">' + (netRole === 'host' ? 'Press ENTER to start the match (' + Math.max(0, settings.bots) + ' bots)' : 'Waiting for the host to start the match...') + '</div>';
+  }
+
+  function updateDebug() {
+    const info = renderer.info.render;
+    let txt = 'BLOCKFIRE\n' + fps + ' FPS   draw calls ' + info.calls + '   tris ' + info.triangles + '   rd ' + effectiveRd;
+    if (game) {
+      const p = game.player, st = game.world.stats();
+      txt += '\nmode ' + game.mode + '   xyz ' + p.pos.x.toFixed(1) + ' ' + p.pos.y.toFixed(1) + ' ' + p.pos.z.toFixed(1) +
+             '   chunk ' + Math.floor(p.pos.x / 16) + ',' + Math.floor(p.pos.z / 16);
+      txt += '\nchunks ' + st.loaded + '  meshed ' + st.meshed + '  queue ' + st.queued + '  dirty ' + st.dirty + '  stashed ' + st.stashed;
+      txt += '\nentities ' + game.entities.size + '   time ' + (game.timeOfDay * 24).toFixed(1) + 'h   ' +
+             (p.flying ? 'FLYING' : p.gliding ? 'gliding' : p.inWater ? 'swimming' : p.onGround ? 'ground' : 'air') +
+             (game.player2 ? '   pad ' + (pad.connected ? 'connected' : 'none') : '');
+      if (p.target) {
+        const def = BLOCK_DEFS[p.target.block];
+        txt += '\ntarget ' + (def ? def.name : p.target.block) + ' @ ' + p.target.x + ',' + p.target.y + ',' + p.target.z;
+        if (p.mining) txt += '  ' + Math.round(p.mining.progress * 100) + '%';
+      }
+    }
+    menu.setDebugText(txt);
+  }
+
+  /** Online host: the simulation needs terrain around every friend, wherever they wander. */
+  function remoteEyes() {
+    return netRole === 'host' && net ? net.remoteCharacters().filter((c) => c.alive).map((c) => c.pos) : [];
+  }
+
+  // ---- online play in a background tab --------------------------------
+  // Browsers stop requestAnimationFrame in hidden tabs. A worker timer (workers aren't
+  // throttled like page timers) keeps the keep-alive pings going on both sides, and on the
+  // host keeps the simulation and the snapshots running so the game doesn't freeze for
+  // every friend while the host looks at another tab.
+  let lastFrameAt = performance.now();
+  let heartbeat = null;
+
+  function startHeartbeat() {
+    if (heartbeat) return;
+    try {
+      const src = 'setInterval(function () { postMessage(0); }, 50);';
+      heartbeat = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      heartbeat.onmessage = () => {
+        if (!net) return;
+        net.keepAlive();
+        if (netRole === 'host' && game && net && performance.now() - lastFrameAt > 250) backgroundStep();
+      };
+    } catch (e) { /* no workers: the frame loop does the keep-alive, and the game waits while the host's tab is hidden */ }
+  }
+
+  function backgroundStep() {
+    const now = performance.now();
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    const eyes = active.map((v) => v.spectate || v.character).filter(Boolean);
+    game.world.update(spawnReady ? eyes.map((h) => h.pos) : [{ x: 0, z: 0 }], remoteEyes());
+    if (state !== 'playing' || game.paused) return;
+    input.takeFrame();
+    accumulator += dt;
+    let n = 0;
+    while (accumulator >= STEP && n < CONFIG.MAX_CATCHUP_TICKS) { game.tick(STEP); accumulator -= STEP; n++; }
+    if (n === CONFIG.MAX_CATCHUP_TICKS) accumulator = 0;
+    net.update(dt);
+  }
+
+  if (AUTOSTART) {
+    if (params.has('name')) settings.playerName = params.get('name');
+    if (params.has('host')) hostGame();
+    else if (params.has('join')) joinGame(normalizeRoomCode(params.get('join')));
+    else startWorld();
+  }
+  requestAnimationFrame(frame);
+})();
