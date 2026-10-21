@@ -40,7 +40,7 @@ WorkerBundle.add(function mesherPart() {
 
   // ---- smooth ground: per-column tops of the 20 x 20 columns around (and including) the chunk -------------
   const CW = 20, TOP = new Int16Array(CW * CW), TOPID = new Uint8Array(CW * CW), CR = new Float32Array(CW * CW), CG = new Float32Array(CW * CW), CB = new Float32Array(CW * CW);
-  const LINK_DY = 1;                                     // columns this close in height are one skin; more is a cliff (cubes)
+  const LINK_DY = 2;                                     // columns this close in height are one skin; more is a cliff (emitSkirts)
   const CORN = [[-1, -1], [0, -1], [0, 0], [-1, 0]];     // the four columns around a corner, in a cycle
   const colTop = (lx, lz) => TOP[(lz + 2) * CW + lx + 2];
   const linked = (a, b) => a >= 0 && b >= 0 && a - b <= LINK_DY && b - a <= LINK_DY;
@@ -138,16 +138,64 @@ WorkerBundle.add(function mesherPart() {
         G.vcount += 4;
       }
     }
+    emitSkirts(G);
+  }
+
+  // edges towards +x and +z: the two corners, and which of each corner's four columns (CORN) the column is (a) and its
+  // neighbour across the edge (b)
+  const SKIRT = [
+    { dx: 1, dz: 0, c: [[1, 0, 3, 2], [1, 1, 0, 1]] },
+    { dx: 0, dz: 1, c: [[0, 1, 1, 2], [1, 1, 0, 3]] },
+  ];
+  /**
+   * Where two ground columns are not one skin (a step of more than LINK_DY), a strip joins the two skins' edges at their
+   * exact corner heights, so the ground is watertight: no cube walls left standing, no holes to the sky. The steep strip
+   * reads as rock in the ground shader. Each chunk does its +x and +z edges; the -x and -z ones belong to the neighbours.
+   */
+  function emitSkirts(G) {
+    for (let z = 0; z < 16; z++) {
+      for (let x = 0; x < 16; x++) {
+        if (colTop(x, z) < 0) continue;
+        for (const S of SKIRT) {
+          const nx = x + S.dx, nz = z + S.dz;
+          if (colTop(nx, nz) < 0) continue;
+          const [p, q] = S.c, P1 = [x + p[0], z + p[1]], P2 = [x + q[0], z + q[1]];
+          const a1 = cornerHeight(P1[0], P1[1], p[2]), b1 = cornerHeight(P1[0], P1[1], p[3]);
+          const a2 = cornerHeight(P2[0], P2[1], q[2]), b2 = cornerHeight(P2[0], P2[1], q[3]);
+          if (Math.abs(a1 - b1) < 1e-3 && Math.abs(a2 - b2) < 1e-3) continue;
+          const dir = (a1 + a2) >= (b1 + b2) ? 1 : -1;                 // it faces the lower side
+          const n = nrm(S.dx * dir, 0.35, S.dz * dir);
+          const ia = (z + 2) * CW + x + 2, ib = (nz + 2) * CW + nx + 2;
+          const r = (CR[ia] + CR[ib]) * 0.4, g = (CG[ia] + CG[ib]) * 0.4, b = (CB[ia] + CB[ib]) * 0.4;
+          const base = G.vcount;
+          for (const [X, Z, h] of [[P1[0], P1[1], a1], [P2[0], P2[1], a2], [P2[0], P2[1], b2], [P1[0], P1[1], b1]]) {
+            G.pos.push(X, h, Z); G.normal.push(n[0], n[1], n[2]); G.color.push(r, g, b);
+          }
+          G.vcount += 4;
+          // wind it to face the lower side: the cross product of its first triangle against the outward direction
+          const o = base * 3, Pp = G.pos;
+          const ux = Pp[o + 3] - Pp[o], uy = Pp[o + 4] - Pp[o + 1], uz = Pp[o + 5] - Pp[o + 2];
+          const vx = Pp[o + 6] - Pp[o], vy = Pp[o + 7] - Pp[o + 1], vz = Pp[o + 8] - Pp[o + 2];
+          const cx = uy * vz - uz * vy, cz = ux * vy - uy * vx;
+          if (cx * S.dx * dir + cz * S.dz * dir >= 0) G.index.push(base, base + 1, base + 2, base, base + 2, base + 3);
+          else G.index.push(base, base + 2, base + 1, base, base + 3, base + 2);
+        }
+      }
+    }
   }
   // ---- props: palms and reeds as real geometry, wherever the voxel data has their marker blocks ----------
-  function newProps() { return { pos: [], normal: [], color: [], sway: [], index: [], vcount: 0 }; }
-  const pvert = (G, x, y, z, nx, ny, nz, r, g, b, sw) => { G.pos.push(x, y, z); G.normal.push(nx, ny, nz); G.color.push(r, g, b); G.sway.push(sw); return G.vcount++; };
+  // tex: (along, across, kind) for the prop shader: kind 0 plain, 1 palm bark (around 0..1, height in blocks), 2 a frond
+  // (along 0..1 from the base, across -1..1) whose leaflets the shader cuts out
+  function newProps() { return { pos: [], normal: [], color: [], sway: [], tex: [], index: [], vcount: 0 }; }
+  const pvert = (G, x, y, z, nx, ny, nz, r, g, b, sw, tu = 0, tv = 0, tk = 0) => {
+    G.pos.push(x, y, z); G.normal.push(nx, ny, nz); G.color.push(r, g, b); G.sway.push(sw); G.tex.push(tu, tv, tk); return G.vcount++;
+  };
   const nrm = (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
   const rngOf = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const hashOf = (x, y, z) => { let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 1274126177); h = Math.imul(h ^ (h >>> 13), 1274126177); return h ^ (h >>> 16); };
 
   /** A leaf strip: a bent centre line with a width that swells and tapers, folded into a shallow V. pts: [x, y, z, halfWidth, t] */
-  function strip(G, pts, sx, sz, c0, c1, sway0, sway1, fold) {
+  function strip(G, pts, sx, sz, c0, c1, sway0, sway1, fold, kind = 0) {
     let prev = null;
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i], t = p[4], a = pts[Math.min(pts.length - 1, i + 1)], b = pts[Math.max(0, i - 1)];
@@ -157,50 +205,79 @@ WorkerBundle.add(function mesherPart() {
       const n = nrm(-sz * ty, sz * tx - sx * tz, sx * ty);
       const r = c0[0] + (c1[0] - c0[0]) * t, g = c0[1] + (c1[1] - c0[1]) * t, bl = c0[2] + (c1[2] - c0[2]) * t, sw = sway0 + (sway1 - sway0) * t;
       const nl = nrm(n[0] + sx * 0.4, n[1], n[2] + sz * 0.4), nr = nrm(n[0] - sx * 0.4, n[1], n[2] - sz * 0.4);
-      const L = pvert(G, p[0] + sx * p[3], p[1] + p[3] * fold, p[2] + sz * p[3], nl[0], nl[1], nl[2], r, g, bl, sw);
-      const R = pvert(G, p[0] - sx * p[3], p[1] + p[3] * fold, p[2] - sz * p[3], nr[0], nr[1], nr[2], r, g, bl, sw);
+      const L = pvert(G, p[0] + sx * p[3], p[1] + p[3] * fold, p[2] + sz * p[3], nl[0], nl[1], nl[2], r, g, bl, sw, t, 1, kind);
+      const R = pvert(G, p[0] - sx * p[3], p[1] + p[3] * fold, p[2] - sz * p[3], nr[0], nr[1], nr[2], r, g, bl, sw, t, -1, kind);
       if (prev) { G.index.push(prev[0], L, prev[1], prev[1], L, R); }
       prev = [L, R];
     }
   }
 
+  /**
+   * A date palm: a fibrous grey-brown trunk that leans and curves, flared at the foot; a crown of about 26 arching fronds
+   * in three tiers (the old ones drooping, the young ones rising); a skirt of dead brown fronds hanging under it; and
+   * clusters of dates. Fronds are wide strips: the prop shader cuts their leaflets out (tex kind 2) and draws the trunk's
+   * pattern of old leaf bases (kind 1).
+   */
   function emitPalm(G, px, py, pz, H, seed) {
-    const r = rngOf(seed), lean = 0.2 + r() * 0.55, la = r() * Math.PI * 2, lx = Math.cos(la) * lean, lz = Math.sin(la) * lean;
-    const y0 = py - 0.6, top = H + 0.6 + 0.3, RINGS = 6, SEG = 6, base = G.vcount;
+    const r = rngOf(seed), lean = 0.25 + r() * 0.6, la = r() * Math.PI * 2, lx = Math.cos(la) * lean, lz = Math.sin(la) * lean;
+    const y0 = py - 0.6, top = H + 0.6 + 0.4, RINGS = 12, SEG = 9, S1 = SEG + 1, base = G.vcount, bark = 0.85 + r() * 0.15;
     const at = (t) => [px + lx * t * t, y0 + top * t, pz + lz * t * t];
     for (let k = 0; k < RINGS; k++) {
-      const t = k / (RINGS - 1), c = at(t), rad = 0.33 - 0.1 * t + (t < 0.16 ? 0.13 * (1 - t / 0.16) : 0), band = k % 2 ? 0.88 : 1;
-      const cr = (0.5 + 0.06 * r()) * band, cg = (0.38 + 0.05 * r()) * band, cb = (0.25 + 0.04 * r()) * band;
-      for (let s = 0; s < SEG; s++) {
-        const a = s / SEG * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), n = nrm(ca, 0.12, sa);
-        pvert(G, c[0] + ca * rad, c[1], c[2] + sa * rad, n[0], n[1], n[2], cr, cg, cb, t * t * 0.35);
+      const t = k / (RINGS - 1), c = at(t);
+      const rad = 0.29 - 0.07 * t + (t < 0.12 ? 0.17 * (1 - t / 0.12) ** 2 : 0) + (t > 0.88 ? 0.07 * (t - 0.88) / 0.12 : 0);
+      const cr = (0.47 - 0.07 * t) * bark, cg = (0.39 - 0.06 * t) * bark, cb = (0.3 - 0.05 * t) * bark;
+      for (let s = 0; s <= SEG; s++) {          // the seam is doubled so the bark pattern wraps cleanly
+        const a = s / SEG * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), n = nrm(ca, 0.1, sa);
+        pvert(G, c[0] + ca * rad, c[1], c[2] + sa * rad, n[0], n[1], n[2], cr, cg, cb, t * t * 0.3, s / SEG, top * t, 1);
       }
     }
     for (let k = 0; k < RINGS - 1; k++) {
       for (let s = 0; s < SEG; s++) {
-        const i0 = base + k * SEG + s, i1 = base + k * SEG + (s + 1) % SEG, j0 = base + (k + 1) * SEG + s, j1 = base + (k + 1) * SEG + (s + 1) % SEG;
+        const i0 = base + k * S1 + s, i1 = i0 + 1, j0 = i0 + S1, j1 = j0 + 1;
         G.index.push(i0, j0, i1, i1, j0, j1);
       }
     }
-    // the crown: a ring of drooping fronds, a few upright ones in the middle, a bunch of dates
-    const T = at(1), NF = 7 + Math.floor(r() * 2);
-    for (let f = 0; f < NF + 3; f++) {
-      const inner = f >= NF, a = (inner ? (f - NF) / 3 : f / NF) * Math.PI * 2 + (r() - 0.5) * 0.5;
-      const L = inner ? 1.3 + r() * 0.5 : 2.1 + r() * 0.9, pitch = inner ? 1.5 : 0.8 + r() * 0.3, droop = inner ? 1.4 : 1.25 + r() * 0.45;
-      const ca = Math.cos(a), sa = Math.sin(a), pts = [], SEGF = 4;
+    const T = at(1), g0 = 0.88 + r() * 0.2;
+    /** one frond from the crown: angle a, length L, rising `pitch`, falling `droop` (both per unit of length) */
+    const frond = (a, L, pitch, droop, w0, c0, c1, sway0, sway1, fold) => {
+      const ca = Math.cos(a), sa = Math.sin(a), pts = [], SEGF = 8;
       for (let i = 0; i <= SEGF; i++) {
-        const sP = i / SEGF, d = L * sP * (inner ? 0.55 : 0.92), h = L * (pitch * sP - droop * sP * sP) * (inner ? 0.7 : 1);
-        const w = 0.6 * Math.sin(Math.PI * (0.09 + 0.84 * sP)) * (1 - 0.5 * sP * sP) * (inner ? 0.7 : 1);
-        pts.push([T[0] + ca * d, T[1] + 0.1 + h, T[2] + sa * d, w, sP]);
+        const s = i / SEGF, d = L * s * 0.92, h = L * (pitch * s - droop * s * s);
+        const w = w0 * Math.pow(Math.sin(Math.PI * (0.05 + 0.9 * s)), 0.6) * (1 - 0.3 * s);
+        pts.push([T[0] + ca * (d + 0.12), T[1] + 0.05 + h, T[2] + sa * (d + 0.12), w, s]);
       }
-      const tint = 0.9 + r() * 0.2;
-      strip(G, pts, -sa, ca, [0.17 * tint, 0.34 * tint, 0.11 * tint], [0.42 * tint, 0.58 * tint, 0.18 * tint], 0.3, 1.0, 0.14);
+      strip(G, pts, -sa, ca, c0, c1, sway0, sway1, fold, 2);
+    };
+    const green = (k, y = 0) => [[0.23 * k, 0.3 * k, 0.19 * k], [0.42 * k + y, 0.48 * k + y * 0.8, 0.3 * k]];
+    const NO = 11 + Math.floor(r() * 3), off = r() * 6.3;
+    for (let f = 0; f < NO; f++) {             // the outer tier: long, arching well below the crown
+      const [c0, c1] = green(g0 * (0.9 + r() * 0.15), r() < 0.25 ? 0.08 : 0);
+      frond(off + f / NO * Math.PI * 2 + (r() - 0.5) * 0.35, 2.7 + r() * 1.0, 0.45 + r() * 0.25, 0.85 + r() * 0.3, 0.85, c0, c1, 0.3, 1.0, 0.22);
     }
-    for (let k = 0; k < 2; k++) {          // dates
-      const a = r() * Math.PI * 2, cx = T[0] + Math.cos(a) * 0.22, cz = T[2] + Math.sin(a) * 0.22, cy = T[1] - 0.18, q = 0.13, c = [0.42, 0.24, 0.1];
-      const v = [pvert(G, cx, cy + q, cz, 0, 1, 0, c[0], c[1], c[2], 0.5), pvert(G, cx + q, cy, cz, 1, 0, 0, c[0], c[1], c[2], 0.5), pvert(G, cx, cy, cz + q, 0, 0, 1, c[0], c[1], c[2], 0.5),
-        pvert(G, cx - q, cy, cz, -1, 0, 0, c[0], c[1], c[2], 0.5), pvert(G, cx, cy, cz - q, 0, 0, -1, c[0], c[1], c[2], 0.5), pvert(G, cx, cy - q, cz, 0, -1, 0, c[0], c[1], c[2], 0.5)];
-      G.index.push(v[0], v[2], v[1], v[0], v[3], v[2], v[0], v[4], v[3], v[0], v[1], v[4], v[5], v[1], v[2], v[5], v[2], v[3], v[5], v[3], v[4], v[5], v[4], v[1]);
+    for (let f = 0; f < 8; f++) {              // the middle tier: out and up
+      const [c0, c1] = green(g0 * (0.95 + r() * 0.15));
+      frond(off + (f + 0.5) / 8 * Math.PI * 2 + (r() - 0.5) * 0.4, 2.3 + r() * 0.7, 1.0 + r() * 0.3, 0.8 + r() * 0.25, 0.75, c0, c1, 0.3, 0.9, 0.26);
+    }
+    for (let f = 0; f < 5; f++) {              // the young fronds: nearly upright
+      const [c0, c1] = green(g0 * 1.08, 0.03);
+      frond(off + f / 5 * Math.PI * 2 + r(), 1.5 + r() * 0.6, 2.0 + r() * 0.4, 0.9, 0.55, c0, c1, 0.25, 0.7, 0.3);
+    }
+    const ND = 3 + Math.floor(r() * 4);
+    for (let f = 0; f < ND; f++) {             // dead fronds hanging against the trunk
+      const k = 0.85 + r() * 0.25;
+      frond(r() * Math.PI * 2, 1.6 + r() * 0.6, -0.3, 1.5 + r() * 0.5, 0.5, [0.34 * k, 0.26 * k, 0.17 * k], [0.52 * k, 0.42 * k, 0.27 * k], 0.1, 0.35, 0.35);
+    }
+    const NC = 2 + Math.floor(r() * 3);
+    for (let c = 0; c < NC; c++) {             // date clusters under the crown
+      const a = r() * Math.PI * 2, rr = 0.32 + r() * 0.1, cx0 = T[0] + Math.cos(a) * rr, cz0 = T[2] + Math.sin(a) * rr, cy0 = T[1] - 0.3;
+      const ripe = r(), col = ripe < 0.5 ? [0.78, 0.48, 0.12] : [0.55, 0.22, 0.08];
+      for (let k = 0; k < 7; k++) {
+        const cx = cx0 + (r() - 0.5) * 0.22, cz = cz0 + (r() - 0.5) * 0.22, cy = cy0 - r() * 0.35, q = 0.06, qy = 0.09, j = 0.9 + r() * 0.2;
+        const c3 = [col[0] * j, col[1] * j, col[2] * j];
+        const v = [pvert(G, cx, cy + qy, cz, 0, 1, 0, ...c3, 0.5), pvert(G, cx + q, cy, cz, 1, 0, 0, ...c3, 0.5), pvert(G, cx, cy, cz + q, 0, 0, 1, ...c3, 0.5),
+          pvert(G, cx - q, cy, cz, -1, 0, 0, ...c3, 0.5), pvert(G, cx, cy, cz - q, 0, 0, -1, ...c3, 0.5), pvert(G, cx, cy - qy, cz, 0, -1, 0, ...c3, 0.5)];
+        G.index.push(v[0], v[2], v[1], v[0], v[3], v[2], v[0], v[4], v[3], v[0], v[1], v[4], v[5], v[1], v[2], v[5], v[2], v[3], v[5], v[3], v[4], v[5], v[4], v[1]);
+      }
     }
   }
 
@@ -215,6 +292,129 @@ WorkerBundle.add(function mesherPart() {
     }
   }
 
+  // ---- story: blocks drawn as props instead of cubes (the voxels, and so walking and climbing, stay) ----------------
+  // leaves (prop 3) are ivy on old walls; cloth (prop 4) hung up is an awning, cloth lying free is a bed; cloth set into
+  // a floor (a carpet) stays a cube
+  const SY = PW * PW, SZ = PW;
+  function clothProp(pi) {
+    const below = P[pi - SY];
+    if (!OPAQUE[below] || GROUND[below] === 2) return 1;          // hung up, or on posts: an awning
+    let open = 0;
+    if (!OPAQUE[P[pi + 1]]) open++;
+    if (!OPAQUE[P[pi - 1]]) open++;
+    if (!OPAQUE[P[pi + SZ]]) open++;
+    if (!OPAQUE[P[pi - SZ]]) open++;
+    return open >= 2 && !OPAQUE[P[pi + SY]] ? 2 : 0;
+  }
+  const asProp = (id, pi) => SMOOTH && (PROP[id] === 3 || (PROP[id] === 4 && clothProp(pi) > 0));
+  const isCloth = (pi) => PROP[P[pi]] === 4;
+
+  /** A clump of ivy: small leaves round the block, flat against the walls beside it, a few strands hanging below. */
+  function emitIvy(G, x, y, z, pi, seed) {
+    const r = rngOf(seed);
+    const walls = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]].filter((d) => OPAQUE[P[pi + d[0] + d[2] * SZ]]);
+    const leaf = (px, py, pz, ax, ay, az, len, w) => {
+      // a leaf along (ax, ay, az) from (px, py, pz): its width across, the side axis perpendicular to it and to up
+      let sx = -az, sz = ax; const sl = Math.hypot(sx, sz) || 1; sx /= sl; sz /= sl;
+      if (Math.abs(ay) > 0.9) { sx = 1; sz = 0; }
+      const k = 0.75 + r() * 0.4, c0 = [0.13 * k, 0.24 * k, 0.09 * k], c1 = [0.24 * k, 0.4 * k, 0.15 * k];
+      const pts = [];
+      for (let i = 0; i <= 3; i++) { const t = i / 3; pts.push([px + ax * len * t, py + ay * len * t - 0.04 * t * t, pz + az * len * t, w * Math.sin(Math.PI * (0.1 + 0.85 * t)), t]); }
+      strip(G, pts, sx, sz, c0, c1, 0.05, 0.22, 0.15, 3);
+    };
+    const N = 34;
+    for (let i = 0; i < N; i++) {
+      let px = x + 0.1 + r() * 0.8, py = y + r(), pz = z + 0.1 + r() * 0.8;
+      let ax = r() - 0.5, ay = r() * 0.6 - 0.1, az = r() - 0.5;
+      if (walls.length && r() < 0.7) {           // against a wall: on its face, the leaf lying along it
+        const d = walls[Math.floor(r() * walls.length)];
+        if (d[0]) { px = d[0] > 0 ? x + 0.98 : x + 0.02; ax = -d[0] * 0.25; }
+        if (d[2]) { pz = d[2] > 0 ? z + 0.98 : z + 0.02; az = -d[2] * 0.25; }
+      }
+      const l = Math.hypot(ax, ay, az) || 1;
+      leaf(px, py, pz, ax / l, ay / l, az / l, 0.16 + r() * 0.12, 0.06 + r() * 0.04);
+    }
+    if (!OPAQUE[P[pi - SY]] && walls.length) {   // strands down the wall
+      for (let s = 0; s < 3; s++) {
+        const d = walls[s % walls.length], len = 0.6 + r() * 0.9;
+        let px = x + 0.2 + r() * 0.6, pz = z + 0.2 + r() * 0.6;
+        if (d[0]) px = d[0] > 0 ? x + 0.97 : x + 0.03;
+        if (d[2]) pz = d[2] > 0 ? z + 0.97 : z + 0.03;
+        for (let k = 0; k < 6; k++) {
+          const t = k / 6;
+          leaf(px + (r() - 0.5) * 0.08, y + 0.1 - len * t, pz + (r() - 0.5) * 0.08, (r() - 0.5) * 0.6 - d[0] * 0.3, -0.5, (r() - 0.5) * 0.6 - d[2] * 0.3, 0.13 + r() * 0.06, 0.05);
+        }
+      }
+    }
+  }
+
+  /** A quad of the cloth (tex kind 4: the prop shader stripes it along tex.x), both sides lit. */
+  function clothQuad(G, a, b, c, d, ta, tb, col, sw) {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+    const n = nrm(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    const i0 = pvert(G, a[0], a[1], a[2], n[0], n[1], n[2], col[0], col[1], col[2], sw[0], ta, 0, 4);
+    const i1 = pvert(G, b[0], b[1], b[2], n[0], n[1], n[2], col[0], col[1], col[2], sw[1], tb, 0, 4);
+    const i2 = pvert(G, c[0], c[1], c[2], n[0], n[1], n[2], col[0], col[1], col[2], sw[2], tb, 0, 4);
+    const i3 = pvert(G, d[0], d[1], d[2], n[0], n[1], n[2], col[0], col[1], col[2], sw[3], ta, 0, 4);
+    G.index.push(i0, i1, i2, i0, i2, i3);
+  }
+
+  /** An awning: striped linen stretched over the cell, sagging between the beams, a scalloped valance on its open edges. */
+  function emitAwning(G, x, y, z, pi, wx, wz) {
+    const top = y + 0.86, N = 6, col = [0.92, 0.86, 0.72];
+    const h = (u, v) => top - 0.09 * Math.sin(Math.PI * u) - 0.02 * Math.sin(Math.PI * v);
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N; j++) {
+        const u0 = i / N, u1 = (i + 1) / N, v0 = j / N, v1 = (j + 1) / N;
+        clothQuad(G, [x + u0, h(u0, v0), z + v0], [x + u0, h(u0, v1), z + v1], [x + u1, h(u1, v1), z + v1], [x + u1, h(u1, v0), z + v0],
+          wz + v0, wz + v1, col, [0.04, 0.04, 0.04, 0.04]);
+      }
+    }
+    // valances: along each open edge, hanging down, scalloped at the bottom
+    const edges = [[0, -1, [x, z], [x + 1, z]], [0, 1, [x + 1, z + 1], [x, z + 1]], [-1, 0, [x, z + 1], [x, z]], [1, 0, [x + 1, z], [x + 1, z + 1]]];
+    for (const [ex, ez, A, B] of edges) {
+      if (isCloth(pi + ex + ez * SZ)) continue;
+      const M = 8;
+      for (let k = 0; k < M; k++) {
+        const t0 = k / M, t1 = (k + 1) / M;
+        const p0 = [A[0] + (B[0] - A[0]) * t0, A[1] + (B[1] - A[1]) * t0], p1 = [A[0] + (B[0] - A[0]) * t1, A[1] + (B[1] - A[1]) * t1];
+        const y0 = (ex ? h(ex > 0 ? 1 : 0, t0) : h(t0, ez > 0 ? 1 : 0)), y1 = (ex ? h(ex > 0 ? 1 : 0, t1) : h(t1, ez > 0 ? 1 : 0));
+        const d0 = 0.2 + 0.06 * Math.abs(Math.sin(t0 * Math.PI * 4)), d1 = 0.2 + 0.06 * Math.abs(Math.sin(t1 * Math.PI * 4));
+        const o = 0.01;
+        const s0 = ex ? (wz + (p0[1] - z)) : (wx + (p0[0] - x)), s1 = ex ? (wz + (p1[1] - z)) : (wx + (p1[0] - x));
+        clothQuad(G, [p0[0] + ex * o, y0, p0[1] + ez * o], [p1[0] + ex * o, y1, p1[1] + ez * o], [p1[0] + ex * o, y1 - d1, p1[1] + ez * o], [p0[0] + ex * o, y0 - d0, p0[1] + ez * o],
+          s0, s1, col, [0.04, 0.04, 0.3, 0.3]);
+      }
+    }
+  }
+
+  /** A bed: a low mattress of linen, a striped blanket over it falling over its open sides. */
+  function emitBed(G, x, y, z, pi, wx, wz) {
+    const linen = [0.86, 0.8, 0.68], H = 0.38, ins = 0.05;
+    const openX0 = !isCloth(pi - 1), openX1 = !isCloth(pi + 1), openZ0 = !isCloth(pi - SZ), openZ1 = !isCloth(pi + SZ);
+    const x0 = x + (openX0 ? ins : 0), x1 = x + 1 - (openX1 ? ins : 0), z0 = z + (openZ0 ? ins : 0), z1 = z + 1 - (openZ1 ? ins : 0);
+    const box = (ax, ay, az, bx, by, bz, c) => {
+      const f = [[[ax, ay, bz], [bx, ay, bz], [bx, by, bz], [ax, by, bz]], [[bx, ay, az], [ax, ay, az], [ax, by, az], [bx, by, az]],
+        [[bx, ay, bz], [bx, ay, az], [bx, by, az], [bx, by, bz]], [[ax, ay, az], [ax, ay, bz], [ax, by, bz], [ax, by, az]],
+        [[ax, by, bz], [bx, by, bz], [bx, by, az], [ax, by, az]]];
+      for (const q of f) {
+        const ux = q[1][0] - q[0][0], uy = q[1][1] - q[0][1], uz = q[1][2] - q[0][2], vx = q[3][0] - q[0][0], vy = q[3][1] - q[0][1], vz = q[3][2] - q[0][2];
+        const n = nrm(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+        const v = q.map((p) => pvert(G, p[0], p[1], p[2], n[0], n[1], n[2], c[0], c[1], c[2], 0));
+        G.index.push(v[0], v[1], v[2], v[0], v[2], v[3]);
+      }
+    };
+    box(x0, y, z0, x1, y + H, z1, linen);
+    // the blanket: a little above the mattress, hanging down its open sides
+    const bt = y + H + 0.015, col = [0.93, 0.88, 0.76], sw = [0, 0, 0, 0];
+    clothQuad(G, [x0 - 0.01, bt, z0 - 0.01], [x0 - 0.01, bt, z1 + 0.01], [x1 + 0.01, bt, z1 + 0.01], [x1 + 0.01, bt, z0 - 0.01], wz, wz + 1, col, sw);
+    const drop = bt - 0.24;
+    if (openX0) clothQuad(G, [x0 - 0.012, bt, z1], [x0 - 0.012, bt, z0], [x0 - 0.012, drop, z0], [x0 - 0.012, drop, z1], wz + 1, wz, col, sw);
+    if (openX1) clothQuad(G, [x1 + 0.012, bt, z0], [x1 + 0.012, bt, z1], [x1 + 0.012, drop, z1], [x1 + 0.012, drop, z0], wz, wz + 1, col, sw);
+    if (openZ0) clothQuad(G, [x0, bt, z0 - 0.012], [x1, bt, z0 - 0.012], [x1, drop, z0 - 0.012], [x0, drop, z0 - 0.012], wx, wx + 1, col, sw);
+    if (openZ1) clothQuad(G, [x1, bt, z1 + 0.012], [x0, bt, z1 + 0.012], [x0, drop, z1 + 0.012], [x1, drop, z1 + 0.012], wx + 1, wx, col, sw);
+  }
+
   function propsOf(c, cx, cz) {
     const G = newProps();
     for (let z = 0; z < 16; z++) {
@@ -223,6 +423,13 @@ WorkerBundle.add(function mesherPart() {
           const k = PROP[c[x + z * 16 + y * 256]];
           if (!k) continue;
           const seed = hashOf(cx * 16 + x, y, cz * 16 + z);
+          if (k === 3) { emitIvy(G, x, y, z, PBASE + y * SY + z * SZ + x, seed); continue; }
+          if (k === 4) {
+            const pi = PBASE + y * SY + z * SZ + x, kind = clothProp(pi);
+            if (kind === 1) emitAwning(G, x, y, z, pi, cx * 16 + x, cz * 16 + z);
+            else if (kind === 2) emitBed(G, x, y, z, pi, cx * 16 + x, cz * 16 + z);
+            continue;
+          }
           if (k === 1) {
             let n = 0;
             while (y < 63 && PROP[c[x + z * 16 + y * 256]] === 1) { n++; y++; }
@@ -235,7 +442,8 @@ WorkerBundle.add(function mesherPart() {
     return G;
   }
   function packProps(G) {
-    return { pos: new Float32Array(G.pos), normal: new Float32Array(G.normal), color: new Float32Array(G.color), sway: new Float32Array(G.sway), index: new Uint32Array(G.index) };
+    return { pos: new Float32Array(G.pos), normal: new Float32Array(G.normal), color: new Float32Array(G.color), sway: new Float32Array(G.sway),
+      tex: new Float32Array(G.tex), index: new Uint32Array(G.index) };
   }
 
   function packGround(G) {
@@ -271,14 +479,15 @@ WorkerBundle.add(function mesherPart() {
   }
 
   function newLayer() {
-    return { pos: [], uv: [], tile: [], shade: [], normal: [], index: [], vcount: 0 };
+    return { pos: [], uv: [], tile: [], shade: [], normal: [], edge: [], index: [], vcount: 0 };
   }
 
   function emitQuad(L, d, u, v, sign, face, i, ui, vi, w, h, key) {
-    const tile = (key >> 8) - 1, ao = key & 255;
+    const tile = ((key >>> 8) & 0xfff) - 1, ao = key & 255, edges = (key >>> 20) & 15;
     const aoc = [ao & 3, (ao >> 2) & 3, (ao >> 4) & 3, (ao >> 6) & 3];
     let pd = i + (sign > 0 ? 1 : 0);
     if (tile === WATER_TILE && d === 1 && sign > 0) pd -= WATER_DROP;
+    if (SMOOTH && edges) { emitBevelled(L, d, u, v, sign, pd, ui, vi, w, h, tile, aoc, edges); return; }
     const base = L.vcount, p = [0, 0, 0];
     for (let k = 0; k < 4; k++) {
       p[d] = pd; p[u] = ui + CU[k] * w; p[v] = vi + CV[k] * h;
@@ -289,6 +498,7 @@ WorkerBundle.add(function mesherPart() {
       if (SMOOTH) {                       // lit from the normal in the shader: only the occlusion is baked
         L.shade.push(AO_LEVEL[aoc[k]]);
         L.normal.push(d === 0 ? sign : 0, d === 1 ? sign : 0, d === 2 ? sign : 0);
+        L.edge.push(9, 9, 9, 9);
       } else L.shade.push(FACE_SHADE[face] * AO_LEVEL[aoc[k]]);
     }
     // Flip the triangulation diagonal so AO gradients interpolate smoothly.
@@ -299,13 +509,70 @@ WorkerBundle.add(function mesherPart() {
     L.vcount += 4;
   }
 
+  /**
+   * Story: a face with outside corners, chamfered. The face is inset by BEV on each corner edge and adds half of the
+   * bevel there: a strip from its inset edge to the middle line of the bevel, where the neighbouring face's half meets it
+   * (both lie in the same 45 degree plane). Where two corner edges meet, a triangle closes the face's share of the
+   * block's corner. `edge` carries the distance to each corner edge (0 on the middle line), so the shader turns the light
+   * smoothly over the bevel.
+   */
+  const BEV = 0.07;
+  function emitBevelled(L, d, u, v, sign, pd, ui, vi, w, h, tile, aoc, edges) {
+    const E0 = edges & 1, E1 = edges & 2, E2 = edges & 4, E3 = edges & 8, c = BEV, hc = c / 2;
+    const p = [0, 0, 0];
+    // a vertex at face coordinates (lu, lv) from the quad's corner, ph along the normal (negative: into the block)
+    const vert = (lu, lv, ph, e0, e1, e2, e3) => {
+      p[d] = pd + ph * sign; p[u] = ui + lu; p[v] = vi + lv;
+      L.pos.push(p[0], p[1], p[2]);
+      if (d === 0) L.uv.push(lv, lu); else L.uv.push(lu, lv);
+      L.tile.push(tile);
+      const s = Math.min(1, Math.max(0, lu / w)), t = Math.min(1, Math.max(0, lv / h));     // occlusion: bilinear over the face
+      L.shade.push(AO_LEVEL[aoc[0]] * (1 - s) * (1 - t) + AO_LEVEL[aoc[1]] * s * (1 - t) + AO_LEVEL[aoc[2]] * s * t + AO_LEVEL[aoc[3]] * (1 - s) * t);
+      L.normal.push(d === 0 ? sign : 0, d === 1 ? sign : 0, d === 2 ? sign : 0);
+      L.edge.push(E0 ? e0 : 9, E1 ? e1 : 9, E2 ? e2 : 9, E3 ? e3 : 9);
+      return L.vcount++;
+    };
+    // triangles keep the face's winding (u x v = +d; flipped for the back faces)
+    const tri = (a, b, cc) => { if (sign > 0) L.index.push(a, b, cc); else L.index.push(a, cc, b); };
+    const quad = (a, b, cc, dd) => { tri(a, b, cc); tri(a, cc, dd); };
+    const u0 = E0 ? c : 0, u1 = w - (E1 ? c : 0), v0 = E2 ? c : 0, v1 = h - (E3 ? c : 0);
+    // distances to the four edges of a point on the face plane
+    const fv = (lu, lv) => vert(lu, lv, 0, lu, w - lu, lv, h - lv);
+    quad(fv(u0, v0), fv(u1, v0), fv(u1, v1), fv(u0, v1));
+    // half bevels along each corner edge (the middle line: hc in from the edge and hc into the block)
+    if (E0) quad(vert(hc, v0, -hc, 0, w, v0, h - v0), vert(u0, v0, 0, u0, w - u0, v0, h - v0), vert(u0, v1, 0, u0, w - u0, v1, h - v1), vert(hc, v1, -hc, 0, w, v1, h - v1));
+    if (E1) quad(vert(u1, v0, 0, u1, w - u1, v0, h - v0), vert(w - hc, v0, -hc, w, 0, v0, h - v0), vert(w - hc, v1, -hc, w, 0, v1, h - v1), vert(u1, v1, 0, u1, w - u1, v1, h - v1));
+    if (E2) quad(vert(u0, hc, -hc, u0, w - u0, 0, h), vert(u1, hc, -hc, u1, w - u1, 0, h), vert(u1, v0, 0, u1, w - u1, v0, h - v0), vert(u0, v0, 0, u0, w - u0, v0, h - v0));
+    if (E3) quad(vert(u0, v1, 0, u0, w - u0, v1, h - v1), vert(u1, v1, 0, u1, w - u1, v1, h - v1), vert(u1, h - hc, -hc, u1, w - u1, h, 0), vert(u0, h - hc, -hc, u0, w - u0, h, 0));
+    // corners where two corner edges meet: the face's triangle of the bevel, and its third of the block's corner
+    const corner = (cu, cv, su, sv, eu, ev) => {
+      // cu, cv: the corner; su, sv: +1 / -1 into the face; eu, ev: which edge components are the corner's
+      const iu = cu + su * c, iv = cv + sv * c, mu = cu + su * hc, mv = cv + sv * hc, m3u = cu + su * c * 2 / 3, m3v = cv + sv * c * 2 / 3;        // the corner triangle's centre
+      const ed = (lu, lv, a, b) => {
+        const e = [lu, w - lu, lv, h - lv];
+        if (a >= 0) e[eu] = 0;
+        if (b >= 0) e[ev] = 0;
+        return e;
+      };
+      const P0 = ed(iu, iv, -1, -1), PA = ed(mu, iv, 0, -1), PB = ed(iu, mv, -1, 0), PM = ed(m3u, m3v, 0, 0);
+      const i0 = vert(iu, iv, 0, ...P0), iA = vert(mu, iv, -hc, ...PA), iB = vert(iu, mv, -hc, ...PB);
+      const iM = vert(m3u, m3v, -c * 2 / 3, ...PM);
+      // keep the winding the face's: the order depends on which corner this is
+      if (su * sv > 0) { tri(i0, iA, iB); tri(iA, iM, iB); } else { tri(i0, iB, iA); tri(iA, iB, iM); }
+    };
+    if (E0 && E2) corner(0, 0, 1, 1, 0, 2);
+    if (E1 && E2) corner(w, 0, -1, 1, 1, 2);
+    if (E1 && E3) corner(w, h, -1, -1, 1, 3);
+    if (E0 && E3) corner(0, h, 1, -1, 0, 3);
+  }
+
   function packLayer(L) {
     const o = {
       pos: new Float32Array(L.pos), uv: new Float32Array(L.uv),
       tile: new Float32Array(L.tile), shade: new Float32Array(L.shade),
       index: new Uint32Array(L.index),
     };
-    if (SMOOTH) o.normal = new Float32Array(L.normal);
+    if (SMOOTH) { o.normal = new Float32Array(L.normal); o.edge = new Float32Array(L.edge); }
     return o;
   }
 
@@ -330,14 +597,16 @@ WorkerBundle.add(function mesherPart() {
               const a = P[idx];
               if (a === 0) continue;
               const l = idx + step, b = P[l];
-              if (OPAQUE[b] || a === b) continue;
+              if ((OPAQUE[b] && !asProp(b, l)) || a === b) continue;
+              if (asProp(a, idx)) continue;                                  // drawn as a prop (ivy, an awning, a bed)
               if (SMOOTH && GROUND[a] === 1) {
-                // natural ground is drawn by the smooth skin: no cube tops, and no cube sides between neighbours of one skin
+                // natural ground is drawn by the smooth skin: no cube tops, and no cube sides towards another ground column
+                // (one skin, or a cliff that emitSkirts closes)
                 const bx = d === 0 ? i : d === 1 ? vi : ui, by = d === 0 ? ui : d === 1 ? i : vi, bz = d === 0 ? vi : d === 1 ? ui : i;
                 const tl = colTop(bx, bz);
                 if (tl >= 0) {
                   if (d === 1) { if (sign > 0 && by === tl) continue; }
-                  else if (linked(tl, colTop(d === 0 ? bx + sign : bx, d === 2 ? bz + sign : bz))) continue;
+                  else if (colTop(d === 0 ? bx + sign : bx, d === 2 ? bz + sign : bz) >= 0) continue;
                 }
               }
               const tile = FACE_TILES[a * 6 + face];
@@ -348,7 +617,15 @@ WorkerBundle.add(function mesherPart() {
                 ao = cornerAO(l, su, sv, -1, -1) | (cornerAO(l, su, sv, 1, -1) << 2)
                    | (cornerAO(l, su, sv, 1, 1) << 4) | (cornerAO(l, su, sv, -1, 1) << 6);
               }
-              mask[n] = ((tile + 1) << 8) | ao;
+              // story: which edges of this face are outside corners (the block beside it, and the cell in front of that, open)
+              let edges = 0;
+              if (SMOOTH && OPAQUE[a] && !LIQUID[a]) {
+                if (!OPAQUE[P[idx - su]] && !OPAQUE[P[l - su]]) edges |= 1;
+                if (!OPAQUE[P[idx + su]] && !OPAQUE[P[l + su]]) edges |= 2;
+                if (!OPAQUE[P[idx - sv]] && !OPAQUE[P[l - sv]]) edges |= 4;
+                if (!OPAQUE[P[idx + sv]] && !OPAQUE[P[l + sv]]) edges |= 8;
+              }
+              mask[n] = (edges << 20) | ((tile + 1) << 8) | ao;
               any = true;
             }
           }
@@ -367,7 +644,7 @@ WorkerBundle.add(function mesherPart() {
                   h++;
                 }
               }
-              const layer = ((key >> 8) - 1) === WATER_TILE ? waterL : solidL;
+              const layer = (((key >>> 8) & 0xfff) - 1) === WATER_TILE ? waterL : solidL;
               emitQuad(layer, d, u, v, sign, face, i, ui, vi, w, h, key);
               for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) mask[(vi + y) * du + ui + x] = 0;
               ui += w;

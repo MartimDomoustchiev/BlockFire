@@ -223,7 +223,7 @@ class StormVisual {
   constructor(scene) {
     const g = new THREE.CylinderGeometry(1, 1, 1, 96, 1, true);
     g.translate(0, 0.5, 0);
-    this.mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xa040ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+    this.mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xa040ff, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false, fog: false }));
     this.mesh.visible = false;
     this.mesh.renderOrder = 7;
     this.mesh.frustumCulled = false;

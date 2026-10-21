@@ -9,6 +9,7 @@
  * Quality presets decide the map size (0 = no shadows; phones) and how far it reaches (Ultra: twice as far, as sharp).
  * ============================================================ */
 const SHADOW_LAYER = 6;                  // the render layer of the things that cast sun shadows (see the header)
+const PROP_SHADOW_LAYER = 7;             // palms and reeds: drawn in a second pass with their own material (leaflets cut out)
 
 class SunShadow {
   constructor(size, extent = 46) {
@@ -41,9 +42,9 @@ class SunShadow {
 
   /**
    * Draws the shadow map for this frame. `shared` is the story material's uniform set (sun direction in uSunDir),
-   * `camera` the viewer's camera: the map is centred a little ahead of it.
+   * `camera` the viewer's camera: the map is centred a little ahead of it. `propMat` draws the PROP_SHADOW_LAYER objects.
    */
-  render(renderer, scene, shared, camera) {
+  render(renderer, scene, shared, camera, propMat) {
     const sun = shared.uSunDir.value, e = this.extent;
     // low sun: shadows would stretch far outside the map; fade them out and stop drawing the pass
     const strength = Math.max(0, Math.min(1, (sun.y - 0.1) / 0.14));
@@ -78,6 +79,13 @@ class SunShadow {
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, false);
     renderer.render(scene, cam);
+    if (propMat) {
+      const mask = cam.layers.mask;
+      cam.layers.set(PROP_SHADOW_LAYER);
+      scene.overrideMaterial = propMat;
+      renderer.render(scene, cam);
+      cam.layers.mask = mask;
+    }
     renderer.setRenderTarget(prevTarget);
     renderer.setScissorTest(prevScissor);
     scene.overrideMaterial = prevOverride;

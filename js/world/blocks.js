@@ -104,7 +104,7 @@ const BlockTables = (function () {
     // story mode's smooth ground (worker/mesher.js): 1 = natural ground, drawn as one skin; 2 = a prop that stands on it, looked through
     ground: new Uint8Array(N),
     groundColor: new Float32Array(N * 3),
-    prop: new Uint8Array(N),            // story mode: blocks the smooth mesher draws as real geometry: 1 = palm trunk, 2 = reeds (a bush)
+    prop: new Uint8Array(N),            // story mode: blocks the smooth mesher draws as real geometry: 1 = palm trunk, 2 = reeds (a bush), 3 = ivy (leaves), 4 = an awning or a bed (cloth)
   };
   const GROUND_COLORS = {
     [BLOCK.GRASS]: [0.46, 0.55, 0.22], [BLOCK.DIRT]: [0.5, 0.37, 0.25], [BLOCK.STONE]: [0.66, 0.6, 0.52], [BLOCK.SAND]: [0.88, 0.73, 0.47],
@@ -112,7 +112,7 @@ const BlockTables = (function () {
   };
   for (const id of Object.keys(GROUND_COLORS)) { t.ground[id] = 1; t.groundColor.set(GROUND_COLORS[id], id * 3); }
   for (const id of [BLOCK.WOOD, BLOCK.LEAVES, BLOCK.CACTUS, BLOCK.BUSH, BLOCK.HAY, BLOCK.PALM]) t.ground[id] = 2;
-  t.prop[BLOCK.PALM] = 1; t.prop[BLOCK.BUSH] = 2;
+  t.prop[BLOCK.PALM] = 1; t.prop[BLOCK.BUSH] = 2; t.prop[BLOCK.LEAVES] = 3; t.prop[BLOCK.CLOTH] = 4;
   BLOCK_DEFS.forEach((d, id) => {
     if (!d) return;
     t.opaque[id] = d.opaque ? 1 : 0;

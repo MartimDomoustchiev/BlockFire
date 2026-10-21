@@ -263,6 +263,10 @@ drawn). The default, *Auto*, picks Ultra on a desktop graphics card (Radeon RX, 
 phones and High elsewhere. Ultra draws the scene at 1.5x with 4x anti-aliasing and filters it down sharp, adds bloom,
 sun rays and a film grade, a wider and finer shadow map, cumulus clouds and 12 chunks of view.
 *Auto resolution* sharpens or softens the picture to keep the frame rate up. Auto distance is separate.
+On Medium and above, people are real human bodies (MakeHuman, see Originality) in garments made for them (the Order's
+hooded coat, robes, kilts, cloaks, headcloths, collars, beards) that move with the body; Low keeps the lighter drawn
+figures. The lobby's *Body* row picks a man or a woman. In story mode the stone has worn, bevelled edges instead of
+cube corners, leaves grow as ivy and cloth hangs as awnings or lies as beds.
 
 ## Project layout
 
@@ -317,4 +321,10 @@ Camera: `&tp=1` / `&tp=0` forces third / first person.
 
 ## Originality
 
-All names, characters, vehicles, weapons, textures and sounds in BLOCKFIRE are original and generated in code.
+All names, characters, vehicles, weapons, textures and sounds in BLOCKFIRE are original and generated in code, except:
+
+- **The people's bodies** (`js/assets/humans-data.js`): a man and a woman built with [MakeHuman](http://www.makehumancommunity.org)
+  from its system assets (body, skins, eyes, brows, lashes, hair, a shirt with trousers, shoes), all released under
+  **CC0** (public domain). `tools/humans/` rebuilds them; the game greys and tints the clothes; the robes, hoods, cloaks,
+  kilts, collars and beards are the game's own, made for these bodies by `tools/humans/garments.py`.
+- **`vendor/three/GLTFLoader.js` and `SkeletonUtils.js`**: from three.js r147 (MIT licence, like `three.min.js`).

@@ -80,16 +80,35 @@ function buildStoryAtlas() {
   tile(TILE.SNOW, (u, v) => mul([238, 240, 244], 0.96 + 0.06 * fbm(u, v, 8, 50)));
   tile(TILE.BEDROCK, (u, v) => mul([78, 72, 66], 0.8 + 0.4 * fbm(u, v, 8, 51)));
 
-  /** sandstone ashlar: courses of cut blocks, bevelled, with weathering */
+  /** sandstone ashlar: three courses of cut blocks of uneven length (each course splits the tile its own way, so the
+      tile still wraps), the arrises worn round, sandy mortar, pits and a patina; light from the top left */
   const ashlar = (u, v) => {
-    const row = Math.floor(v * 4), off = (row % 2) * 0.25;
-    const e = cellEdge(u, v, 0.5, 0.25, off);
-    const tone = 0.9 + 0.2 * ihash(e.ix + row * 7, row, 61);
-    let c = mul(mix([214, 184, 128], [232, 204, 150], fbm(u, v, 4, 62)), tone * (0.9 + 0.2 * fbm(u, v, 20, 63)) * grain(u, v, 9, 0.04));
-    c = mix(c, [120, 98, 66], (1 - smooth(0.004, 0.022, e.dt)) * 0.9);
-    // bevel: light from the top-left
-    const lit = (e.y < 0.14 ? 0.1 : 0) - (e.y > 0.86 ? 0.12 : 0) + (e.x < 0.05 ? 0.06 : 0) - (e.x > 0.95 ? 0.08 : 0);
-    return mul(c, 1 + lit);
+    const rows = 3, row = Math.min(rows - 1, Math.floor(v * rows)), y = v * rows - row;
+    // where this course's joints fall: two or three stones, the first joint anywhere
+    const n = 2 + (ihash(row, 1, 64) > 0.55 ? 1 : 0), start = ihash(row, 2, 65);
+    let x = ((u - start) % 1 + 1) % 1, k = 0, len = 1 / n;
+    const cuts = [0];
+    for (let i = 1; i < n; i++) cuts.push(i / n + (ihash(row, 10 + i, 66) - 0.5) * 0.5 / n);
+    cuts.push(1);
+    for (let i = 0; i < n; i++) if (x >= cuts[i] && x < cuts[i + 1]) { k = i; len = cuts[i + 1] - cuts[i]; x = (x - cuts[i]) / len; }
+    const id = row * 7 + k;
+    // distance to the stone's edge in tile units, the edge wandering a little (eroded arrises)
+    const wob = (fbm(u, v, 16, 67) - 0.5) * 0.016;
+    const dx = Math.min(x, 1 - x) * len, dy = Math.min(y, 1 - y) / rows, d = Math.min(dx, dy) + wob;
+    const tone = 0.88 + 0.22 * ihash(id, row, 61);
+    const warm = ihash(id, 3, 68);
+    let c = mix([206, 176, 124], [226, 198, 146], fbm(u, v, 4, 62));
+    c = mix(c, [214, 172, 116], warm * 0.35);
+    c = mul(c, tone * (0.92 + 0.16 * fbm(u, v, 24, 63)) * grain(u, v, 9, 0.035));
+    // pits and a darker patina in the hollows
+    const pit = smooth(0.78, 0.86, fbm(u, v, 32, 69));
+    c = mul(c, 1 - pit * 0.22);
+    // worn edges: the face rounds off into the joint, the joint is sandy mortar a little darker than the stone
+    const edge = smooth(0.003, 0.03, d);
+    const joint = [168, 142, 102];
+    c = mix(joint, c, 0.35 + 0.65 * edge);
+    const lit = (1 - smooth(0.0, 0.04, dy + wob)) * (y > 0.5 ? 0.09 : -0.1) + (1 - smooth(0.0, 0.03, dx + wob)) * (x < 0.5 ? 0.04 : -0.05);
+    return mul(c, 1 + lit * edge);
   };
   tile(TILE.COBBLE, ashlar);
   tile(TILE.BUILD_STONE, ashlar);

@@ -48,8 +48,8 @@ const TOUCH_TESTS = {
     // FIRE held: the intent says fire while the finger is down
     const fire = await rect('#touchUi .tFire');
     await f.down(fire.x, fire.y, 3);
-    await page.waitForTimeout(120);
-    const firing = await page.evaluate(() => __game.player.intent.fire);
+    // the intent is read on the next simulation tick: wait for it (software rendering can take longer than a frame)
+    const firing = await page.waitForFunction(() => __game.player.intent.fire === true, null, { timeout: 3000, polling: 30 }).then(() => true, () => false);
     await f.up();
     ctx.assert(firing === true, 'holding FIRE fires');
     ctx.assert(errors.length === 0, 'no page errors: ' + JSON.stringify(errors.slice(0, 3)));

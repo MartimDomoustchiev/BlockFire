@@ -168,7 +168,25 @@ function playerOutfit(spec) {
   if (s.facial) o.facial = s.facial;
   if (s.hood) o.hood = acc;
   if (s.cloak) o.cloak = acc;
+  if (s.body === 1) o.female = true;
   return o;
+}
+
+/** What a real person (render/humans.js) wears for an outfit: skin, shirt, trousers, shoes, hair. */
+function humanDress(o) {
+  return {
+    skin: o.skin || SKIN_TONES[2], shirt: o.jacket || o.sleeve || o.shirt || 0xd8ccb0, trousers: o.trousers || 0x3a3228,
+    shoes: o.boots || 0x3a2a1c, hair: o.hair || 0x2a1d14, hairStyle: o.hairStyle || 'short',
+    bareTop: !!o.bare, bareLegs: o.robe === 'kilt',
+    noHair: !!(o.hood || o.helmet || o.ranger || o.nemes || o.scarf || o.tophat),
+    // the garments made for the bodies (when the people carry them: HumanModels kinds' `garments`)
+    wear: {
+      robe: o.robe, robeColor: o.robeColor, trim: o.trim !== undefined ? o.trim : mixHex(o.robeColor || 0x888888, 0x000000, 0.25),
+      belt: o.belt, hood: o.hood, scarf: o.scarf, cloak: o.cloak !== undefined ? o.cloak : o.cape,
+      beard: o.beard !== undefined ? o.beard : o.facial === 2 ? o.hair || 0x3a2a1a : undefined,
+      collar: o.usekh, collarStripe: o.usekh !== undefined ? mixHex(o.usekh, 0x2c4f9a, 0.65) : undefined,
+    },
+  };
 }
 
 /** The Order's robe in a player's colours (the uniform stays the same in story mode). */
@@ -176,7 +194,8 @@ function orderOutfit(spec) {
   const s = PLAYER_LOOK.normalize(spec), top = LOOK_TOPS[s.top];
   return Object.assign({}, OUTFITS.order, {
     skin: SKIN_TONES[s.skin], shirt: mixHex(top, 0xffffff, 0.2), sleeve: top, hood: top, robeColor: top,
-    trousers: LOOK_BOTTOMS[s.bottom], trim: LOOK_ACCENTS[s.accent],
+    trousers: LOOK_BOTTOMS[s.bottom], trim: LOOK_ACCENTS[s.accent], female: s.body === 1,
+    hair: LOOK_HAIR[s.hair].color, hairStyle: LOOK_STYLES[s.style],
   });
 }
 
@@ -192,6 +211,7 @@ function outfitFor(ch) {
     const woman = id % 2 === 1, V = VILLAGER_COLORS;
     const o = { shirt: pick(V.tunic, 0), sleeve: pick(V.tunic, 0), trousers: pick(V.legs, 2), boots: 0x7a5a34, belt: 0x6a4a2a, hair: pick(V.hair, 3), skin: pick(SKIN_TONES.slice(2), 4) };
     o.hairStyle = woman ? VILLAGER_HAIR_WOMAN[id % VILLAGER_HAIR_WOMAN.length] : VILLAGER_HAIR_MAN[id % VILLAGER_HAIR_MAN.length];
+    if (woman) o.female = true;
     if (woman) { o.robe = 'long'; o.robeColor = pick(V.skirt, 1); if (id % 3 === 0) o.scarf = pick(V.skirt, 5); }
     else {
       if (id % 3 === 0) { o.bare = true; o.robe = 'kilt'; o.robeColor = pick(V.skirt, 6); }       // a bare chest and a linen kilt
@@ -259,6 +279,7 @@ const BodyGeometry = {
   },
 
   build(o) {
+    if (o.garmentsOnly) return this.garments(o);
     const K = BodyKit, R = RIG, skin = o.skin, S = {};
     const darkSkin = new THREE.Color(skin).multiplyScalar(0.85).getHex();
     // legs: thigh, shin (with knee and boot), foot - each hanging down from its joint
@@ -398,6 +419,66 @@ const BodyGeometry = {
     }
     return S;
   },
+
+  /**
+   * Only what is worn over a real body (render/humans.js): robes, the kilt, capes and cloaks, hoods, helmets,
+   * headcloths and hats, collars, sashes, aprons, the ranger's armour, bracers and gloves. The body, the face,
+   * the hair, the shirt, the trousers and the boots come from the person. Pivots as in build().
+   */
+  garments(o) {
+    const K = BodyKit, R = RIG, S = {}, T = [], H = [];
+    // the bodies' own garments (skinned: robes, the kilt, the hood, the headcloth, the cloak, the beard) replace these
+    if (o.skinned) o = Object.assign({}, o, { robe: null, hood: null, scarf: null, cape: null, cloak: null, beard: null, usekh: null });
+    if (o.tabard) T.push(K.box(0.32, 0.66, 0.022, o.tabard, 0, 0.13, -0.142), K.box(0.32, 0.66, 0.022, o.tabard, 0, 0.13, 0.142));
+    if (o.apron) T.push(K.box(0.32, 0.72, 0.02, o.apron, 0, 0.08, -0.14));
+    if (o.sash) T.push(K.box(0.07, 0.52, 0.02, o.trim, 0.02, 0.24, -0.135, 0, 0, 0.55));
+    if (o.chain) T.push(K.torus(0.1, 0.012, o.chain, 0, 0.38, -0.07, 1.25, 0, 0));
+    if (o.usekh) {
+      T.push(K.torus(0.122, 0.034, o.usekh, 0, 0.47, -0.012, Math.PI / 2, 0, 0, 1, 1, 0.55), K.torus(0.092, 0.016, mixHex(o.usekh, 0x2c4f9a, 0.6), 0, 0.48, -0.014, Math.PI / 2, 0, 0, 1, 1, 0.6));
+    }
+    if (o.backpack) T.push(K.box(0.3, 0.34, 0.13, o.backpack, 0, 0.3, 0.18), K.box(0.26, 0.06, 0.14, o.backpack, 0, 0.49, 0.17));
+    if (o.ranger) T.push(K.box(0.38, 0.32, 0.04, o.ranger, 0, 0.3, -0.13));                       // chest plate
+    if (T.length) S.torso = K.merge(T);
+    if (o.hood) {            // close round a real head: deeper at the back, the peak over the brow, the drape down the neck
+      H.push(K.hood(0.128, o.hood, 0, 0.17, 0.02));
+      H.push(K.cone(0.045, 0.09, o.hood, 0, 0.29, -0.085, -1.1, 0, 0));
+      H.push(K.cone(0.1, 0.2, o.hood, 0, 0.07, 0.1, 0.35, 0, 0, 1, 1, 0.5));
+    }
+    if (o.helmet) { H.push(K.cap(0.14, o.helmet, Math.PI / 2, 0, 0.19, 0), K.cyl(0.21, 0.21, 0.016, o.helmet, 0, 0.192, 0)); if (o.plume) H.push(K.cone(0.035, 0.24, o.plume, 0, 0.42, 0.02, 0.25, 0, 0)); }
+    if (o.ranger) H.push(K.sph(0.145, o.ranger, 0, 0.17, 0, 1, 1.02, 1.04), K.box(0.05, 0.12, 0.05, o.backpack, 0.11, 0.31, 0.06));
+    if (o.nemes) {
+      H.push(K.cap(0.152, o.nemes, 1.75, 0, 0.18, 0, 1, 1.02, 1.05));
+      for (const sx of [-1, 1]) {
+        H.push(K.box(0.07, 0.27, 0.05, o.nemes, sx * 0.13, 0.03, -0.075, 0.08, 0, sx * 0.04));
+        for (const sy of [0.1, 0.03, -0.04]) H.push(K.box(0.072, 0.018, 0.052, o.nemesStripe, sx * 0.13, sy, -0.077, 0.08, 0, sx * 0.04));
+      }
+      H.push(K.box(0.2, 0.03, 0.01, o.nemesStripe, 0, 0.255, -0.138, 0.15, 0, 0));
+      if (o.plume) H.push(K.cone(0.03, 0.22, o.plume, 0, 0.36, 0.01, 0.12, 0, 0));
+    }
+    if (o.tophat) H.push(K.cyl(0.095, 0.1, 0.2, o.tophat, 0, 0.37, 0), K.cyl(0.16, 0.16, 0.016, o.tophat, 0, 0.272, 0), K.cyl(0.101, 0.101, 0.035, 0x6a1a1a, 0, 0.295, 0));
+    if (o.cap) H.push(K.cap(0.13, o.cap, 1.2, 0, 0.2, 0), K.box(0.14, 0.012, 0.08, o.cap, 0, 0.225, -0.13, 0.15, 0, 0));
+    if (o.straw) H.push(K.cyl(0.24, 0.24, 0.014, o.straw, 0, 0.255, 0), K.cyl(0.1, 0.115, 0.09, o.straw, 0, 0.3, 0));
+    if (o.scarf) H.push(K.hood(0.135, o.scarf, 0, 0.17, 0.01));
+    if (o.beard) H.push(K.cone(0.065, 0.16, o.beard, 0, 0.05, -0.085, Math.PI + 0.25, 0, 0));
+    if (H.length) S.head = K.merge(H);
+    const fore = [];
+    if (o.bracers) fore.push(K.cyl(0.05, 0.044, 0.12, o.bracers, 0, -R.FORE + 0.075, 0));
+    if (o.gloves) fore.push(K.cyl(0.046, 0.044, 0.05, o.gloves, 0, -R.FORE + 0.02, 0));
+    if (fore.length) { S.foreL = K.merge(fore.map((p) => ({ g: p.g.clone(), c: p.c }))); S.foreR = K.merge(fore); }
+    if (o.robe) {
+      const len = o.robe === 'long' ? 0.84 : o.robe === 'coat' ? 0.62 : o.robe === 'kilt' ? 0.4 : 0.54;
+      const open = o.robe === 'long' ? 0 : o.robe === 'coat' ? 0.5 : o.robe === 'kilt' ? 0.3 : 0.9;
+      const bottom = o.robe === 'long' ? 0.31 : o.robe === 'kilt' ? 0.23 : 0.28;
+      S.skirt = K.merge([K.grad(K.shell(0.18, bottom, len, o.robeColor, open, 0, -len / 2 + 0.04, 0), 0.8, 1.02)]);
+      S.skirtLen = len;
+    }
+    // capes and cloaks: a curved sheet from the shoulders, round the back and sides, open at the front, flaring down
+    // (the pivot is on the upper back, so the axis of the sheet runs through the body)
+    const drape = (color, open, len) => K.merge([K.grad(K.shell(0.2, 0.33, len, color, open, 0, -len / 2 + 0.03, -0.15), 0.72, 1.04)]);
+    if (o.cape) S.cape = drape(o.cape, Math.PI * 0.9, 0.95);
+    if (o.cloak) S.cape = drape(o.cloak, Math.PI * 0.75, 1.02);
+    return S;
+  },
 };
 
 /**
@@ -511,54 +592,78 @@ const CharacterLights = {
 
 class CharacterModel {
   constructor(ch, scene) {
-    const o = outfitFor(ch), S = BodyGeometry.get(o), R = RIG;
+    const o = outfitFor(ch), R = RIG;
     if (scene) CharacterLights.install(scene);
+    // a real person (render/humans.js) once the people are loaded; until then, and on the Low preset, the drawn body.
+    // Either way the same rig of joints below is what update() animates.
+    const kind = HumanModels.available() && !ch.drawnBody ? (o.female && HumanModels.kinds.female) || HumanModels.kinds.male : null;
+    this.gen = HumanModels.generation;          // a newer generation (the people loaded, the preset changed) rebuilds this model
+    const S = BodyGeometry.get(kind ? Object.assign({ garmentsOnly: true, skinned: !!kind.garments }, o) : o);
     // Phong instead of Lambert: a little sheen on fabric and hair, still cheap for dozens of people
     this.mat = new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide, shininess: 12, specular: 0x1c1f24 });
     this.mats = [this.mat];
     const group = (parent, x, y, z) => { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; };
-    const mesh = (geo, parent, mat) => { const m = new THREE.Mesh(geo, mat || this.mat); m.layers.enable(SHADOW_LAYER); parent.add(m); return m; };       // casts sun shadows in story mode
+    const mesh = (geo, parent, mat) => { if (!geo || !parent) return null; const m = new THREE.Mesh(geo, mat || this.mat); m.layers.enable(SHADOW_LAYER); parent.add(m); return m; };       // casts sun shadows in story mode
+    const drawn = (g) => (kind ? null : g);      // body segments are only drawn for the drawn body
 
     this.root = new THREE.Group();
     this.body = group(this.root, 0, 0, 0);
     this.body.rotation.order = 'YXZ';
     // legs
     this.hips = group(this.body, 0, R.HIP_Y, 0);
-    mesh(S.pelvis, this.hips);
+    mesh(S.pelvis, drawn(this.hips));
     const leg = (side) => {
       const thigh = group(this.hips, side * R.HIP_X, 0, 0);
-      mesh(S.thigh, thigh);
+      mesh(S.thigh, drawn(thigh));
       const shin = group(thigh, 0, -R.THIGH, 0);
-      mesh(S.shin, shin);
+      mesh(S.shin, drawn(shin));
       const foot = group(shin, 0, -R.SHIN, 0);
-      mesh(S.foot, foot);
+      mesh(S.foot, drawn(foot));
       return { thigh, shin, foot };
     };
     this.legL = leg(-1); this.legR = leg(1);
-    if (S.skirt) { this.skirt = group(this.hips, 0, 0.02, 0); mesh(S.skirt, this.skirt); }
+    if (S.skirt) this.skirt = group(this.hips, 0, 0.02, 0);
     // torso, head, arms
     this.torso = group(this.body, 0, R.HIP_Y, 0);
-    mesh(S.torso, this.torso);
     this.head = group(this.torso, 0, R.NECK - 0.07, 0);
-    mesh(S.head, this.head);
-    if (o.visor) {
-      const glow = new THREE.MeshBasicMaterial({ color: o.visor });
-      glow.userData.glow = true;
-      this.mats.push(glow);
-      const v = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.055, 0.03), glow); v.position.set(0, 0.18, -0.13); this.head.add(v);
-      const c = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.02), glow); c.position.set(0, 0.32, -0.145); this.torso.add(c);
-      this.glowGeo = [v.geometry, c.geometry];
-    }
-    if (S.cape) { this.cape = group(this.torso, 0, R.SHOULDER_Y + 0.02, 0.13); mesh(S.cape, this.cape); }
+    if (S.cape || (kind && kind.garments && (o.cloak || o.cape))) this.cape = group(this.torso, 0, R.SHOULDER_Y + 0.02, 0.13);   // a skinned cloak's bone follows it
     const arm = (side) => {
       const shoulder = group(this.torso, side * R.SHOULDER_X, R.SHOULDER_Y, 0);
-      mesh(S.upper, shoulder);
+      mesh(S.upper, drawn(shoulder));
       const elbow = group(shoulder, 0, -R.UPPER, 0);
-      mesh(side < 0 ? S.foreL : S.foreR, elbow);
       const hand = group(elbow, 0, -R.FORE - 0.06, 0);
       return { shoulder, elbow, hand };
     };
     this.armL = arm(-1); this.armR = arm(1);
+    // where worn and held things hang: the rig's groups for the drawn body, holders on the bones for a real one
+    const at = {};
+    if (kind) {
+      const H = this.human = new HumanBody(kind, humanDress(o), this.body);
+      // the pivots the garments were made for: the hips for the torso, a point under the skull for the head
+      const hipY = H.restAt('pelvis').y, head = H.restAt('head');
+      at.torso = H.attach('spine_01', 'torso', new THREE.Group(), H.restOffset('spine_01', [0, hipY, 0]));
+      at.head = H.attach('head', 'head', new THREE.Group(), H.restOffset('head', [head.x, head.y - 0.08, head.z + 0.01]));
+      at.skirt = this.skirt && H.attach('pelvis', { base: 'hips', group: this.skirt }, new THREE.Group(), H.restOffset('pelvis', [0, hipY + 0.04, 0]));
+      at.cape = this.cape && H.attach('spine_03', { base: 'torso', group: this.cape }, new THREE.Group(), H.restOffset('spine_03', [0, hipY + R.SHOULDER_Y + 0.04, 0.14]));
+      at.foreL = H.attach('lowerarm_l', 'elbowL', new THREE.Group());
+      at.foreR = H.attach('lowerarm_r', 'elbowR', new THREE.Group());
+      at.handL = H.attach('hand_l', 'handL', new THREE.Group(), new THREE.Vector3(0, -0.075, 0));
+      at.handR = H.attach('hand_r', 'handR', new THREE.Group(), new THREE.Vector3(0, -0.075, 0));
+      for (const k in at) if (at[k]) at[k] = at[k].children[0];
+    } else {
+      Object.assign(at, { torso: this.torso, head: this.head, skirt: this.skirt, cape: this.cape, foreL: this.armL.elbow, foreR: this.armR.elbow, handL: this.armL.hand, handR: this.armR.hand });
+    }
+    mesh(S.torso, at.torso); mesh(S.head, at.head); mesh(S.skirt, at.skirt); mesh(S.cape, at.cape);
+    mesh(S.foreL, at.foreL); mesh(S.foreR, at.foreR);
+    if (o.visor) {
+      const glow = new THREE.MeshBasicMaterial({ color: o.visor });
+      glow.userData.glow = true;
+      this.mats.push(glow);
+      const v = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.055, 0.03), glow); v.position.set(0, 0.18, -0.13); at.head.add(v);
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.02), glow); c.position.set(0, 0.32, -0.145); at.torso.add(c);
+      this.glowGeo = [v.geometry, c.geometry];
+    }
+    this.hold = at;
 
     // what the right hand can hold: a gun, a sword, the wrist blade (all built now, so the self-layer covers them)
     const steel = this._basic(0xd8dde4), dark = this._basic(0x3b3f4a);
@@ -568,18 +673,18 @@ class CharacterModel {
     box(0.06, 0.15, 0.09, dark, 0, -0.08, 0.02, this.gun);
     this.gunAccent = box(0.11, 0.035, 0.3, this._basic(0xffffff), 0, 0.09, -0.2, this.gun);
     this.gun.rotation.x = -Math.PI / 2;
-    this.armR.hand.add(this.gun);
+    at.handR.add(this.gun);
     // swords: the Order's straight sword and the enforcers' sabre (proper blades, lit like the body)
     this.swords = { longsword: new THREE.Mesh(WeaponGeometry.get('longsword'), this.mat), sword: new THREE.Mesh(WeaponGeometry.get('sword'), this.mat) };
-    for (const m of Object.values(this.swords)) { m.position.y = -0.02; this.armR.hand.add(m); }
+    for (const m of Object.values(this.swords)) { m.position.y = -0.02; at.handR.add(m); }
     // the bow, in the left hand: upright when the arm points forward, string towards us
     this.bow = new BowRig(this.mat);
     this.bow.group.rotation.x = -Math.PI / 2;
     this.bow.group.position.y = -0.03;
-    this.armL.hand.add(this.bow.group);
+    at.handL.add(this.bow.group);
     this.bow.strMat.userData.base = new THREE.Color(0xe8e4d4);
     this.mats.push(this.bow.strMat);
-    this.blade = box(0.02, 0.03, 0.3, steel, 0, 0.0, 0, this.armR.hand);
+    this.blade = box(0.02, 0.03, 0.3, steel, 0, 0.0, 0, at.handR);
     this.blade.rotation.x = -Math.PI / 2;
     this.blade.position.set(0, -0.08, 0.02);
 
@@ -727,9 +832,16 @@ class CharacterModel {
     const hurt = ch.alive && ch.game && ch.game.time - ch.lastDamageTime < 0.12;
     this.mat.emissive.setRGB(hurt ? 0.55 : 0, hurt ? 0.12 : 0, hurt ? 0.1 : 0);
     if (this.light) for (const m of this.mats) if (m.userData.base && !m.userData.glow) m.color.copy(m.userData.base).multiply(this.light);
+    if (this.human) {
+      this.grip = [hasBow || hasGun, hasGun || hasSword || this.blade.visible];       // hands closed round what they hold
+      this.human.pose(this);                 // the skeleton follows the rig's joints
+      this.human.flash(hurt);
+      if (this.light) this.human.setLight(this.light);
+    }
   }
 
   dispose() {
+    if (this.human) this.human.dispose();
     if (this.root.parent) this.root.parent.remove(this.root);
     for (const m of this.mats) m.dispose();
     if (this.glowGeo) for (const g of this.glowGeo) g.dispose();

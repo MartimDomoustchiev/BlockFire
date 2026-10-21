@@ -17,7 +17,7 @@
  * (per-client delta) and only near the receiving player.
  * ============================================================ */
 const NET = {
-  VERSION: 9,                  // bump whenever the wire format or world generation changes (2: story mode, 3: story fixes, 4: arms crates, 5: bow, sword, hideout chest, 6: looks, 7: journal state, eighteen chapters, 8: the desert story land: palms, sand, smooth ground, 9: brick houses, shadows and grade)
+  VERSION: 11,                  // bump whenever the wire format or world generation changes (2: story mode, 3: story fixes, 4: arms crates, 5: bow, sword, hideout chest, 6: looks, 7: journal state, eighteen chapters, 8: the desert story land: palms, sand, smooth ground, 9: brick houses, shadows and grade, 10: looks carry a body (man / woman) for the real people, 11: the ruined chapel's walls are all dressed stone)
   SNAP_HZ: 20,
   INPUT_HZ: 30,
   INTERP: 0.1,                 // seconds clients render others behind the newest snapshot

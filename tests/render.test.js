@@ -28,7 +28,7 @@ const RENDER_TESTS = {
     for (const [name, res] of [['a', a], ['b', b], ['c', c]]) {
       const G = res.ground;
       ctx.assert(G && G.pos.length > 0 && G.index.length > 0, 'chunk ' + name + ' has a ground skin');
-      ctx.assert(G.index.length / 3 <= 2 * 256, 'at most two triangles per column: ' + G.index.length / 3);
+      ctx.assert(G.index.length / 3 <= 2 * 256 + 4 * 256, 'at most two triangles per column, and two per cliff edge: ' + G.index.length / 3);
       let bad = 0;
       for (let i = 0; i < G.pos.length; i += 3) {
         if (!(G.pos[i + 1] >= 0 && G.pos[i + 1] <= 64) || !isFinite(G.pos[i]) || !isFinite(G.pos[i + 2])) bad++;
@@ -59,7 +59,7 @@ const RENDER_TESTS = {
     ctx.assert(Object.keys(chunks).length === 25);
   },
 
-  'story mesher: no cube tops on natural ground, the walls between neighbours are gone, and cliffs keep their cubes': async (ctx) => {
+  'story mesher: no cube tops or walls on natural ground; cliffs are closed by strips, so the skin has no holes': async (ctx) => {
     const { chunks, mesh, BLOCK } = storyPatch(ctx, 20260101, 6, 6, 2);
     const smooth = mesh(6, 6), flat = storyPatch(ctx, 20260101, 6, 6, 2, false).mesh(6, 6);
     // classic meshing (the other modes) draws a cube face for every ground column: many more opaque triangles than the smooth one
@@ -84,7 +84,7 @@ const RENDER_TESTS = {
         const t0 = Date.now(), r = mesh(cx, cz);
         ms += Date.now() - t0; n++;
         tris += r.props.index.length / 3;
-        ctx.assert(r.props.pos.length === r.props.normal.length && r.props.pos.length === r.props.color.length && r.props.pos.length / 3 === r.props.sway.length, 'props vertex arrays line up');
+        ctx.assert(r.props.pos.length === r.props.normal.length && r.props.pos.length === r.props.color.length && r.props.pos.length / 3 === r.props.sway.length && r.props.tex.length === r.props.pos.length, 'props vertex arrays line up');
       }
     }
     ctx.assert(palms >= 5, 'palms grow on this island: ' + palms);
@@ -92,6 +92,50 @@ const RENDER_TESTS = {
     ctx.assert(ms / n < 60, 'meshing a chunk takes well under a frame budget on average: ' + (ms / n).toFixed(1) + ' ms');
     // palm trunks are solid and opaque (collision and sight lines), and have no cube faces of their own
     ctx.assert(TABLES.solid[BLOCK.PALM] === 1 && TABLES.opaque[BLOCK.PALM] === 1 && TABLES.faceTiles[BLOCK.PALM * 6] === -1, 'the palm core is solid, opaque and has no tile');
+  },
+
+  'story mesher: stone gets bevelled corners; ivy, awnings and beds are props, not cubes': async (ctx) => {
+    const { w, BLOCK } = storyPatch(ctx, 20260101, 0, 0, 0);
+    const c = new Uint8Array(16 * 16 * 64), put = (x, y, z, id) => { c[x + z * 16 + y * 256] = id; };
+    for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) for (let y = 0; y <= 20; y++) put(x, y, z, y === 20 ? BLOCK.SAND : BLOCK.STONE);
+    for (let y = 21; y <= 23; y++) for (let z = 2; z <= 4; z++) for (let x = 2; x <= 4; x++) put(x, y, z, BLOCK.COBBLE);   // a 3 x 3 x 3 block of stone
+    put(3, 24, 1, BLOCK.LEAVES);                                                                                  // ivy on its side, above
+    put(3, 22, 1, BLOCK.LEAVES);
+    for (const [x, z] of [[8, 8], [11, 8], [8, 10], [11, 10]]) for (let y = 21; y <= 23; y++) put(x, y, z, BLOCK.WOOD);   // posts
+    for (let z = 8; z <= 10; z++) for (let x = 8; x <= 11; x++) put(x, 24, z, BLOCK.CLOTH);                         // an awning on them
+    put(13, 21, 3, BLOCK.CLOTH); put(13, 21, 4, BLOCK.CLOTH);                                                       // a bed on the floor
+    const r = w.send({ type: 'mesh', id: 3, blocks: [null, null, null, null, c, null, null, null, null], cx: 0, cz: 0 });
+    const O = r.opaque, nv = O.pos.length / 3;
+    ctx.assert(O.edge && O.edge.length === nv * 4, 'every story cube vertex carries its distances to the corner edges');
+    // the stone block: vertices cut back from its corners (the bevel) and none outside the block
+    let inset = 0, outside = 0, onMid = 0;
+    for (let k = 0; k < nv; k++) {
+      const x = O.pos[k * 3], y = O.pos[k * 3 + 1], z = O.pos[k * 3 + 2];
+      if (x < 1.9 || x > 5.1 || z < 1.9 || z > 5.1 || y < 21 || y > 24.01) continue;
+      if (x < 2 - 1e-4 || x > 5 + 1e-4 || z < 2 - 1e-4 || z > 5 + 1e-4 || y > 24 + 1e-4) outside++;
+      if (Math.abs(x - 2) < 1e-4 && z > 2.01 && z < 2.1 && y > 23.9 && y < 24.0) inset++;
+      for (let e = 0; e < 4; e++) if (O.edge[k * 4 + e] === 0) { onMid++; break; }
+    }
+    ctx.assert(inset > 0, 'faces are cut back along the corner edges: ' + inset);
+    ctx.assert(onMid > 8, 'the bevels meet on their middle lines: ' + onMid);
+    ctx.assert(outside === 0, 'nothing sticks out of the block: ' + outside);
+    // no cube faces for the ivy, the awning or the bed; their props are there instead
+    let clothFaces = 0;
+    for (let k = 0; k < nv; k++) { const x = O.pos[k * 3], y = O.pos[k * 3 + 1], z = O.pos[k * 3 + 2]; if (x > 8.01 && x < 11.99 && z > 8.01 && z < 10.99 && y > 24.5) clothFaces++; }
+    ctx.assert(clothFaces === 0, 'the awning has no cube top: ' + clothFaces);
+    const kinds = {};
+    for (let k = 2; k < r.props.tex.length; k += 3) kinds[r.props.tex[k]] = (kinds[r.props.tex[k]] || 0) + 1;
+    ctx.assert(kinds[3] > 50, 'ivy leaves: ' + JSON.stringify(kinds));
+    ctx.assert(kinds[4] > 100, 'striped cloth (the awning and the bed\'s blanket): ' + JSON.stringify(kinds));
+    // the awning sags under the block's top, the bed's mattress is low
+    let awn = Infinity, bedTop = 0;
+    for (let k = 0; k < r.props.pos.length / 3; k++) {
+      const x = r.props.pos[k * 3], y = r.props.pos[k * 3 + 1], z = r.props.pos[k * 3 + 2];
+      if (x > 8.2 && x < 11.8 && z > 8.2 && z < 10.8 && y > 24) awn = Math.min(awn, y);
+      if (x > 13 && x < 14 && z > 3 && z < 5) bedTop = Math.max(bedTop, y);
+    }
+    ctx.assert(awn > 24.6 && awn < 25, 'the awning hangs inside its block, sagging: ' + awn);
+    ctx.assert(bedTop > 21.3 && bedTop < 21.6, 'the bed is a low mattress: ' + bedTop);
   },
 
   'story world draws a lit landscape: a ground skin, palms, the sky dome; the other modes keep their cubes': async (ctx) => {
@@ -122,6 +166,41 @@ const RENDER_TESTS = {
       return { story: !!w.materials.story, ground, props };
     });
     ctx.assert(!c.story && c.ground === 0 && c.props === 0, 'other modes still draw cubes with the classic materials: ' + JSON.stringify(c));
+  },
+
+  'people: with real bodies on (?humans=1) the lobby figure is a skinned MakeHuman person whose skeleton follows the rig': async (ctx) => {
+    const { page } = await ctx.open('humans=1', { waitReady: false });
+    await page.waitForFunction(() => typeof HumanModels !== 'undefined' && HumanModels.ready && window.__lobby && __lobby.model && __lobby.model.human, null, { timeout: 180000 });
+    const r = await page.evaluate(() => {
+      const M = __lobby.model, H = M.human;
+      M.armR.shoulder.rotation.set(Math.PI / 2, 0, 0);          // the rig's right arm straight forward
+      H.pose(M);
+      M.root.updateMatrixWorld(true);
+      const sh = H.bones.upperarm_r.getWorldPosition(new THREE.Vector3()), el = H.bones.lowerarm_r.getWorldPosition(new THREE.Vector3());
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(M.body.getWorldQuaternion(new THREE.Quaternion()));
+      const hair = Object.entries(H.meshes).filter(([k, m]) => /short|long|afro|ponytail|bob|braid/.test(k) && m.visible).length;
+      return { kinds: Object.keys(HumanModels.kinds), meshes: Object.keys(H.meshes).length, forward: +el.sub(sh).normalize().dot(fwd).toFixed(3), hair };
+    });
+    ctx.assert(r.kinds.includes('male') && r.kinds.includes('female') && r.meshes >= 10, 'a man and a woman, with body, clothes, eyes and hair: ' + JSON.stringify(r));
+    ctx.assert(r.hair === 1, 'one hair style shows: ' + JSON.stringify(r));
+    ctx.assert(r.forward > 0.9, 'the real arm points where the rig\'s arm points: ' + JSON.stringify(r));
+    // garments made for the body: a hood (no hair under it), a cloak on its own bone that trails with the rig's cape, a beard
+    const g = await page.evaluate(() => {
+      __lobby.setLook(Object.assign({}, PLAYER_LOOK.DEFAULT, { hood: true, cloak: true, facial: 2, body: 0 }));
+      const M = __lobby.model, H = M.human, vis = (k) => !!(H.meshes[k] && H.meshes[k].visible);
+      const before = H.bones.cloak.getWorldQuaternion(new THREE.Quaternion());
+      M.cape.rotation.x = -0.6; H.pose(M); M.root.updateMatrixWorld(true);
+      const after = H.bones.cloak.getWorldQuaternion(new THREE.Quaternion());
+      const hair = Object.entries(H.meshes).filter(([k, m]) => /short|long|afro|ponytail|bob|braid/.test(k) && m.visible).length;
+      return { hood: vis('garment_hood'), cloak: vis('garment_cloak'), beard: vis('garment_beard'), skirts: ['garment_tails', 'garment_long', 'garment_kilt'].filter(vis).length,
+        hair, turn: +(2 * Math.acos(Math.min(1, Math.abs(before.dot(after))))).toFixed(2), garb: !!H.meshes.garment_hood.geometry.attributes.garb };
+    });
+    ctx.assert(g.hood && g.cloak && g.beard && g.skirts === 0 && g.hair === 0 && g.garb, 'the hood, the cloak and the beard are worn, no skirt, no hair under the hood: ' + JSON.stringify(g));
+    ctx.assert(g.turn > 0.4, 'the cloak swings with the rig\'s cape: ' + JSON.stringify(g));
+    // the setting off: the drawn body again (software rendering keeps it by default)
+    const { page: p2 } = await ctx.open('', { waitReady: false });
+    await p2.waitForFunction(() => window.__lobby && __lobby.model, null, { timeout: 60000 });
+    ctx.assert(await p2.evaluate(() => !__lobby.model.human && HumanModels.enabled === false), 'software rendering draws the bodies');
   },
 
   'ultra: a desktop graphics card gets Ultra on auto; the post-processed story frame has its shadows, clouds and a picture': async (ctx) => {

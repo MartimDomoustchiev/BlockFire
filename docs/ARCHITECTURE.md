@@ -505,6 +505,82 @@ except the anisotropic filtering and the aerial haze, which are cheap.
 High at 1920x1080 214 fps; Ultra (12 chunks) at 1920x1080 61 fps, at 2560x1440 36 fps. A desktop RX 9060 XT is several
 times an M1's GPU; it was not measured. Software WebGL (the tests) picks High on Auto.
 
+## 22. Look pass 3: palms, the sea to the horizon, haze for everything, the UI and the phone apps' design
+
+- **Date palms** (`emitPalm` in `worker/mesher.js`): a curved, flared trunk (12 rings x 9 sides) and about 26 fronds in
+  three tiers, a skirt of dead fronds and clusters of dates. Props carry a `tex` attribute (along, across, kind): the
+  prop shader cuts the leaflets out of each frond (`frondCut`, widened by `fwidth` so far fronds do not shimmer) and
+  draws the trunk's old leaf bases (kind 1). Props are on `PROP_SHADOW_LAYER` (7): the sun's shadow pass draws them
+  again with `materials.propDepth`, which cuts the same leaflets, so their shadows are dappled.
+- **The far ocean** (`materials.ocean`, `updateOcean` in `main.js`): a plane under the chunks' water that follows the
+  camera out to 1300 blocks (story cameras' far plane), fading in from 40 to 64 blocks so the shallow sea floor shows
+  near you. Its distance is computed per pixel (the plane's corners are far away: an interpolated distance would be
+  wrong). Water hazes over a much longer distance than land (`1 - exp(-0.0028 d)`), so the sea runs to the horizon.
+- **Haze**: the day's horizon (and fog) is a pale, faintly blue white, warm only towards the sun. `scene.fog` follows the
+  terrain's fog, so people, items and effects fade with the land; the storm wall and loot beams keep `fog: false`.
+- **Sky alpha**: the dome writes its sun-ray mask into alpha only for the Ultra post-processing (`Sky.skyMask`). The
+  canvas has an alpha channel, so on the other presets alpha 0 would show the page behind the sky.
+- **The UI theme** (the last block of `index.html`'s styles): a classical serif (Optima / Palatino) for titles and
+  buttons, the system sans for text, dark glass panels with gold hairlines, ivory and gold instead of orange, thin bars,
+  a round minimap. Touch buttons are glass circles with drawn icons (`TOUCH_ICONS` in `input/touch.js`); on a phone
+  the vitals sit under the compass and prompts wrap and drop the key hint.
+- **The lobby stage** (`ui/lobby-stage.js`): a temple court at dusk: a sandstone floor with an inlaid ring, columns,
+  bronze braziers, obelisks and pyramids against an indigo-to-gold sky.
+- **The phone apps' icon and launch screen** (`drawEmblem` in `mac/make-icons.js`, `native/resources/`): the Quiet
+  Order's sigil, an original design (a gold ring, a blade pointing down through it, swept wings) on warm black.
+
+## 23. Real people (MakeHuman bodies) and a watertight ground
+
+- **The people** (`render/humans.js`, assets in `js/assets/humans-data.js`, built by `tools/humans/`): a man and a woman
+  from MakeHuman's CC0 system assets, skinned to its `game_engine` skeleton (pelvis, three spine bones, neck, head,
+  clavicles, arms, hands with fingers, legs, feet). `HumanModels` loads the data script in the background and prepares
+  each kind once; until then, on the Low preset and on software rendering the drawn bodies stay (`?humans=1/0`).
+  `HumanModels.generation` changes when they arrive or are switched: characters rebuild their models.
+- **Posing**: `CharacterModel` keeps its rig of joints and its animation unchanged. `HumanBody.pose` composes each joint's
+  rotation down its chain (torso, head, shoulders, elbows, hands, hips, thighs, shins, feet) and turns each bone's rest
+  rotation by it; limb bones are first straightened to point down like the rig at rest (the bind pose is an A-pose). The
+  spine takes a third of the torso's turn per bone, the neck 40% of the head's. Fingers rest a little curled and close
+  round what the hand holds (`grip`).
+- **Dress** (`humanDress` in models.js): the skin texture tinted to the skin tone; the shirt and trousers greyed and tinted
+  with the outfit's colours (above / below the belt, a `top` attribute); shoes and hair tinted the same way; the iris
+  turned dark brown. The skin under worn clothes is cut away (an `under` vertex mask from the build) so it never shows
+  through; a bare chest hides the shirt and shows the skin, a kilt hides the trousers.
+- **Garments** (`BodyGeometry.garments`): robes and the kilt, capes and cloaks (now a curved sheet round the back),
+  hoods, helmets, the nemes, hats, collars, sashes, the ranger's armour, bracers, the mentor's beard; weapons and the bow.
+  They hang on holders fixed to bones (`HumanBody.attach`), turned like their joint of the rig.
+- **Looks** carry `body` (Man / Woman, NET.VERSION 10).
+- **Cost** (M1 laptop, story at High, 1080p): 231 fps with the drawn bodies, 145 with real people.
+- **Ground** (`emitSkirts` in the mesher): cube faces between two natural ground columns are gone entirely; where two
+  columns are not one skin (a step of more than `LINK_DY`, now 2) a strip joins their edges at the exact corner heights,
+  so the skin is watertight (no stone walls left standing in the sand, no holes to the sky). Steep strips read as rock.
+
+## 24. Garments made for the bodies, stone that is not voxels (NET.VERSION 11)
+
+- **Skinned garments** (`tools/humans/garments.py`, run inside the Blender build): the Order's coat skirt (`garment_tails`:
+  open at the front, split behind), the long robe, the coat, the pleated kilt, a belt, the hood (a soft peak, the face
+  open, a capelet over the shoulders), the headcloth, the cloak, the broad collar (usekh) and the beard. Each is a mesh
+  skinned to the skeleton, shaped by casting rays at the body and its clothes: cloth drapes from the widest ring above it
+  (a running maximum, then a convex hull per ring), with folds that deepen towards the hem. Skirts are made round straight
+  legs (the game straightens the bind pose's legs) and carried back into the bind pose through the inverse of that
+  skinning; their panels follow the thighs, so they move with the walk. The cloak hangs from a bone of its own (`cloak`,
+  under `spine_03`) that the game turns with the rig's cape group (`HUMAN_JOINTS.cloak`). Vertex colour R marks the trim,
+  G the shade in the folds; `humanMaterial(..., { garment: true })` tints them (robe colour, trim colour) and darkens the
+  inside (the hood round the face). `humanDress(o).wear` says what is worn; `BodyGeometry.garments` leaves the old drawn
+  robes, hoods, cloaks, collars and beards out when the body has its own (`kind.garments`).
+- **The start screen and the loading screen** never show the drawn body while the real people are still loading
+  (`HumanModels.pending()`): the plinth stays empty for that moment, and story's loading screen waits for them (20 s at most).
+- **Chamfered stone** (`emitBevelled` in the mesher, story only): a face's edges that are outside corners (the block beside
+  it and the cell in front of that both open) are cut back 7 cm and get half of a 45 degree bevel; the neighbouring face
+  adds the other half, and corners close with small triangles. Such faces are not merged with plain ones. The `edge`
+  attribute (distance to each corner edge, 0 on the bevel's middle line) lets the voxel shader turn the light smoothly over
+  the bevel and wear it unevenly. Collision is still the voxels.
+- **Weathering** (voxel shader): large patches of warmer and paler stone, streaks down the walls, sand on what faces up,
+  lighter worn corners. The sandstone tile is three courses of uneven stones with eroded edges and sandy joints.
+- **Props instead of cubes**: leaves are ivy (small leaves on the walls, strands hanging down); cloth hung up or on posts
+  is an awning (striped linen sagging between the beams, a scalloped valance on its open edges); cloth lying free is a
+  bed (a linen mattress, a striped blanket over it). Cloth set into a floor (a carpet) stays a cube. Prop blocks do not
+  hide their neighbours' faces (`asProp`). The ruined chapel's walls are all dressed stone now (NET.VERSION 11).
+
 ## 19. Engine boundaries (what a reusable engine would take)
 
 Not extracted yet. Generic parts (no BLOCKFIRE rules in them): `core/` (fixed-step `Game`, events, rng), `world/`

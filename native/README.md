@@ -41,8 +41,10 @@ by hand to them. Do not run `cap add` again without copying them back:
 - `ios/App/App/Info.plist`: landscape only on iPhone; export compliance answered (no custom encryption).
 - `ios/App/App/AppDelegate.swift`: `BlockfireViewController`, which hides the status bar.
 - `ios/App/App/Base.lproj/Main.storyboard`: the main view controller is `BlockfireViewController`.
-- Icons and splash screens: made from `resources/icon.png` (1024 px, from `mac/make-icons.js`) and
-  `resources/splash.png`, with `npx @capacitor/assets generate --ios --android --iconBackgroundColor '#0d131d' --iconBackgroundColorDark '#0d131d'`.
+- Icons and splash screens: the Quiet Order's emblem, drawn by `mac/make-icons.js` into `resources/icon.png` (1024 px)
+  and `resources/splash.png` (2732 px), then
+  `npx @capacitor/assets generate --ios --android --iconBackgroundColor '#0c0b0a' --iconBackgroundColorDark '#0c0b0a' --splashBackgroundColor '#0c0b0a'`.
+  After regenerating, build Android with `./gradlew clean assembleDebug` (Gradle can miss replaced images).
 
 The app id is `local.blockfire.game`, the same as the Mac app. Change it in `capacitor.config.json` (and in the
 Android and iOS projects) before publishing to the stores.

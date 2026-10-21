@@ -30,7 +30,9 @@ class Sky {
     // story mode's dome: a gradient with a warm haze at the horizon, a round sun with a glow, a moon and stars
     const P = (r, g, b) => new THREE.Color(r, g, b);
     this._story = {
-      zenithDay: P(0.16, 0.42, 0.8), horizonDay: P(0.88, 0.8, 0.64), zenithDusk: P(0.26, 0.28, 0.52), horizonDusk: P(1.0, 0.56, 0.3),
+      // the day's horizon (and so the haze everything far fades into) is a pale, faintly blue white; the haze turns warm
+      // only towards the sun (story-materials.js haze)
+      zenithDay: P(0.16, 0.42, 0.8), horizonDay: P(0.8, 0.82, 0.84), zenithDusk: P(0.26, 0.28, 0.52), horizonDusk: P(1.0, 0.56, 0.3),
       zenithNight: P(0.015, 0.025, 0.08), horizonNight: P(0.06, 0.07, 0.15),
       sunDay: P(1.0, 0.93, 0.78), sunDusk: P(1.0, 0.6, 0.34), moon: P(0.34, 0.42, 0.68),
       ambDay: P(0.5, 0.62, 0.8), ambDusk: P(0.66, 0.5, 0.46), ambNight: P(0.1, 0.13, 0.26),
@@ -38,6 +40,7 @@ class Sky {
     };
     this.dome = null;
     this.clouds = 0;                     // cumulus on the story dome (the Ultra preset)
+    this.skyMask = 0;                    // 1 while the views draw into the post-processing image (the sky's alpha marks it)
   }
 
   /** Story mode's sun for the sun rays (render/post.js): { dir, col, vis }, or null when the dome is not drawn. */
@@ -50,13 +53,13 @@ class Sky {
   _makeDome() {
     const u = { uZenith: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uSunCol: { value: new THREE.Color() }, uMoonDir: { value: new THREE.Vector3(0, -1, 0) }, uSunVis: { value: 1 }, uNight: { value: 0 }, uTime: { value: 0 },
-      uClouds: { value: 0 } };
+      uClouds: { value: 0 }, uSkyMask: { value: 0 } };
     const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), new THREE.ShaderMaterial({
       uniforms: u, side: THREE.BackSide, depthTest: false, depthWrite: false, fog: false,
       vertexShader: `varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: `
         uniform vec3 uZenith; uniform vec3 uHorizon; uniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uMoonDir; uniform float uSunVis; uniform float uNight; uniform float uTime;
-        uniform float uClouds;
+        uniform float uClouds; uniform float uSkyMask;
         varying vec3 vDir;
         float h31(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -98,8 +101,9 @@ class Sky {
             float star = step(0.9965, h31(g)) * uNight * smoothstep(0.02, 0.25, d.y);
             col += vec3(star) * (0.6 + 0.4 * h31(g + 7.0));
           }
-          // alpha marks the open sky (0) for the sun rays (render/post.js); a cloud hides some of it. The canvas has no alpha.
-          gl_FragColor = vec4(col, cover * 0.8);
+          // drawing for the post-processing (render/post.js), alpha marks the open sky (0) for the sun rays and a cloud hides
+          // some of it. Straight onto the canvas it stays 1: the canvas has an alpha channel, and the page would show through.
+          gl_FragColor = vec4(col, mix(1.0, cover * 0.8, uSkyMask));
         }`,
     }));
     m.renderOrder = -20;
@@ -160,6 +164,7 @@ class Sky {
     u.uNight.value = night;
     this.dome.material.uniforms.uTime.value = shared.uTime ? shared.uTime.value : 0;
     u.uClouds.value = this.clouds;
+    u.uSkyMask.value = this.skyMask;
     this.dome.position.copy(cam);
     this.dome.scale.setScalar(Math.max(60, (this.camera.far || 200) * 0.9));
     // light for the landscape: the sun by day, the moon by night

@@ -6,9 +6,10 @@ WorkerBundle.add(function entryPart() {
     for (const layer of [res.opaque, res.water]) {
       out.push(layer.pos.buffer, layer.uv.buffer, layer.tile.buffer, layer.shade.buffer, layer.index.buffer);
       if (layer.normal) out.push(layer.normal.buffer);
+      if (layer.edge) out.push(layer.edge.buffer);
     }
     if (res.ground) out.push(res.ground.pos.buffer, res.ground.normal.buffer, res.ground.color.buffer, res.ground.index.buffer);
-    if (res.props) out.push(res.props.pos.buffer, res.props.normal.buffer, res.props.color.buffer, res.props.sway.buffer, res.props.index.buffer);
+    if (res.props) out.push(res.props.pos.buffer, res.props.normal.buffer, res.props.color.buffer, res.props.sway.buffer, res.props.tex.buffer, res.props.index.buffer);
     return out;
   }
   self.onmessage = function (e) {

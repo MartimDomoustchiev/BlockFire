@@ -538,6 +538,111 @@
     font-size: 20px; letter-spacing: 2px; text-align: center; padding: 24px; }
   @media (orientation: portrait) and (pointer: coarse) { body.playing #rotateHint { display: flex; } }
   body.touch.playing #overlay { display: none; }
+
+  /* ==== the look: a desert-dusk theme over everything above. Classical serif titles, a clean sans for text, dark glass
+     panels with gold hairlines, ivory and gold instead of orange. It only restyles; the layout above still holds. ==== */
+  :root {
+    --bg: #0c0b0a; --panel: rgba(18,16,13,.82); --edge: rgba(214,176,105,.26); --hi: rgba(255,240,210,.06);
+    --text: #f2eadb; --dim: #a69a86; --accent: #d4a557; --accent2: #ebcc8f;
+    --serif: "Cinzel", "Trajan Pro", Optima, "Palatino Linotype", "Book Antiqua", Palatino, Georgia, "Noto Serif", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --glass: linear-gradient(180deg, rgba(24,21,17,.84), rgba(10,9,8,.88));
+  }
+  html, body { font-family: var(--sans); }
+  h1, h2, h3, button, .kicker, .storyObj .t, .storyTitle h2, #loading, .gLabel, .inv-label, .mode b, .compass span.cardinal { font-family: var(--serif); }
+  .panel, .charCard, .side, #lobby, #storyScreen .offer, .online-box, .gDetail {
+    background: var(--glass); border: 1px solid var(--edge); border-radius: 3px;
+    box-shadow: 0 18px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,236,200,.06);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  h1 { color: var(--accent2); text-shadow: none; font-weight: 600; letter-spacing: .3em; }
+  .brandBox h1 { font-size: 40px; background: linear-gradient(180deg, #f7e9c9 10%, #c3964d 90%); -webkit-background-clip: text; background-clip: text;
+    color: transparent; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+  .sub, .brandBox .sub { color: var(--dim); letter-spacing: .06em; }
+  button { font-weight: 600; font-size: 13px; letter-spacing: .18em; text-transform: uppercase; color: var(--text); background: rgba(22,19,15,.66);
+    border: 1px solid var(--edge); box-shadow: none; border-radius: 2px; transition: background .15s, border-color .15s, color .15s; }
+  button:hover, button.alt:hover { background: rgba(212,165,87,.14); border-color: rgba(212,165,87,.62); }
+  button.alt { background: rgba(22,19,15,.66); color: var(--text); }
+  #btnPlay, #btnResume { background: linear-gradient(180deg, #e6c27f, #b6863b); color: #1c1309; border-color: #f2d69c;
+    box-shadow: 0 6px 22px rgba(196,148,70,.28), inset 0 1px 0 rgba(255,255,255,.35); }
+  #btnPlay:hover, #btnResume:hover { background: linear-gradient(180deg, #f0d08f, #c59443); }
+  .tabs .tab, .gTab { background: transparent; border: 0; border-bottom: 1px solid transparent; color: var(--dim); border-radius: 0; }
+  .tabs .tab:hover, .gTab:hover { background: transparent; color: var(--text); }
+  .tabs .tab.sel, .gTab.sel { background: transparent; color: var(--accent2); border-bottom-color: var(--accent); }
+  .mode, .side .mode { background: rgba(255,240,210,.025); border: 1px solid rgba(214,176,105,.13); }
+  .mode:hover { background: rgba(255,240,210,.06); }
+  .mode.sel { background: rgba(212,165,87,.12); box-shadow: inset 0 0 0 1px var(--accent); }
+  .mode b { letter-spacing: .14em; font-weight: 600; }
+  .mode span, .mode .mtxt span { text-transform: none; letter-spacing: 0; font-family: var(--sans); }
+  .mode .ico { background: transparent; border: 1px solid var(--edge); border-radius: 50%; }
+  .mode.sel .ico { color: var(--accent2); border-color: var(--accent); }
+  .mode.story { background: rgba(212,165,87,.06); } .mode.story b { color: var(--accent2); }
+  .chip { background: rgba(255,240,210,.035); border: 1px solid rgba(214,176,105,.14); color: var(--dim); text-transform: none; letter-spacing: .04em;
+    font-family: var(--sans); font-weight: 500; }
+  .chip:hover { background: rgba(255,240,210,.08); }
+  .chip.sel { background: rgba(212,165,87,.2); color: var(--accent2); border-color: var(--accent); }
+  .swatch { border: 1px solid rgba(0,0,0,.65); border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.15); }
+  .swatch.sel { outline: 1px solid var(--accent2); outline-offset: 2px; }
+  input[type=text], select { background: rgba(0,0,0,.35); border: 1px solid var(--edge); border-radius: 2px; color: var(--text); }
+  .kicker, .charCard h2, .gLabel, #storyScreen h2, #screen h2, #storyScreen .journal h3 { color: var(--accent); letter-spacing: .24em; }
+  #overlay { background: radial-gradient(ellipse at 46% 40%, rgba(0,0,0,0) 30%, rgba(6,5,4,.82) 100%); }
+  #overlay.paused { background: rgba(8,7,6,.78); }
+  #loading { font-family: var(--serif); letter-spacing: .32em; background: radial-gradient(ellipse at center, rgba(20,17,13,.75), rgba(5,4,3,.92)); }
+  #loading .lbar { height: 2px; border: 0; background: rgba(255,240,210,.14); width: 260px; }
+  #loading .lbar i { background: linear-gradient(90deg, #b6863b, #f0d08f); }
+
+  /* the HUD: thin bars, slots of dark glass, the objective as a fading band, gold markers */
+  .bar { height: 10px; background: rgba(0,0,0,.42); border: 0; border-radius: 5px; overflow: hidden; box-shadow: 0 0 0 1px rgba(255,240,210,.14); }
+  .bar > span { font-size: 10px; line-height: 10px; right: 6px; font-family: var(--sans); text-shadow: 0 1px 2px #000; }
+  .bar.shield { height: 6px; } .bar.shield > span { display: none; }
+  .hud .healthBar { background: linear-gradient(90deg, #cdbf9f, #fff7e6); }
+  .hud .healthBar.healing { background: linear-gradient(90deg, #d8f0c8, #ffffff); box-shadow: 0 0 10px rgba(220,255,200,.8); }
+  .hud .shieldBar { background: linear-gradient(90deg, #5f95b8, #bfe2f3); }
+  .slot { background: rgba(12,10,9,.58); border: 1px solid rgba(214,176,105,.2); box-shadow: none; border-radius: 3px; }
+  .hud .hotbar { background: transparent; border: 0; gap: 5px; }
+  .hud .hotbar .slot { background: rgba(12,10,9,.5); }
+  .hud .hotbar .slot.sel { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(212,165,87,.38); }
+  .hud .hotbar.loadout .loadLbl { color: var(--accent2); font-family: var(--serif); letter-spacing: .14em; font-size: 9px; text-shadow: 0 1px 2px #000; }
+  .storyObj { background: linear-gradient(90deg, rgba(8,7,6,.62), rgba(8,7,6,0)); border-left: 2px solid var(--accent); padding: 8px 40px 8px 12px; }
+  .storyObj .t { color: var(--accent2); letter-spacing: .2em; font-size: 10px; }
+  .storyObj .x { font-size: 15px; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
+  .storyStatus .noto i { border: 1px solid rgba(255,240,210,.55); background: linear-gradient(to top, #d9483a var(--f), rgba(20,18,16,.6) var(--f)); }
+  .storyMarker i { background: rgba(240,205,130,.25); border: 2px solid #f2d79a; box-shadow: 0 0 10px rgba(240,200,120,.75); }
+  .storyMarker span { color: #f6e6c4; text-shadow: 0 1px 2px #000; font-family: var(--sans); }
+  .hud .prompt, .storyPrompt { background: rgba(10,9,8,.6); border: 1px solid var(--edge); border-radius: 2px; padding: 6px 14px; letter-spacing: .03em; }
+  kbd { background: transparent; color: var(--accent2); border: 1px solid var(--accent); border-radius: 2px; padding: 0 6px; font-weight: 600; }
+  .storySub { background: linear-gradient(90deg, transparent, rgba(0,0,0,.6) 14%, rgba(0,0,0,.6) 86%, transparent); padding: 8px 48px; text-shadow: 0 1px 3px #000; }
+  .storySub b { color: var(--accent2); }
+  .storyTitle h2 { font-weight: 600; letter-spacing: .3em; color: #f7ead0; text-shadow: 0 2px 16px rgba(0,0,0,.85); }
+  .storyTitle p { color: var(--accent2); text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+  .storyToast { background: rgba(10,9,8,.72); border: 1px solid var(--edge); border-radius: 2px; }
+  .hud .compass { background: linear-gradient(90deg, transparent, rgba(0,0,0,.32) 20%, rgba(0,0,0,.32) 80%, transparent); }
+  .hud .compass span.cardinal { color: var(--accent2); }
+  .hud .compass::after { background: var(--accent2); }
+  .hud .minimap { border: 1px solid rgba(240,215,160,.45); border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 3px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.4); }
+  .jList li { background: rgba(255,240,210,.03); border-left-color: rgba(214,176,105,.3); }
+  .gFig { background: radial-gradient(ellipse at 50% 30%, #2c241a, #0e0c0a 72%); border: 1px solid var(--edge); }
+  .gHead .sClose { margin-left: auto; }
+
+  /* touch: glass buttons with drawn icons (js/input/touch.js), and a layout that keeps clear of them on a phone */
+  #touchUi .tBtn { display: flex; align-items: center; justify-content: center; background: rgba(14,12,10,.36); border: 1px solid rgba(255,240,210,.34);
+    color: #f6ead2; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); box-shadow: 0 2px 12px rgba(0,0,0,.25); }
+  #touchUi .tBtn:hover { background: rgba(14,12,10,.36); }
+  #touchUi .tBtn[hidden] { display: none; }
+  #touchUi .tBtn svg { width: 46%; height: 46%; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  #touchUi .tBtn svg .f { fill: currentColor; stroke: none; }
+  #touchUi .tFire { background: rgba(212,165,87,.26); border-color: rgba(240,214,156,.8); }
+  #touchUi .tBtn.on { background: rgba(212,165,87,.55); border-color: #f6e2b5; }
+  #touchUi .tStick { background: rgba(255,240,210,.05); border: 1px solid rgba(255,240,210,.26); }
+  #touchUi .tStick i { background: rgba(240,215,160,.22); border: 1px solid rgba(255,240,210,.7); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+  #touchUi .tInv, #touchUi .tBuild, #touchUi .tGear, #touchUi .tMap, #touchUi .tJournal, #touchUi .tFly, #touchUi .tMenu { width: 44px; height: 44px; }
+  #touchUi .tInv { left: 14px; } #touchUi .tGear, #touchUi .tBuild { left: 66px; } #touchUi .tMap, #touchUi .tFly { left: 118px; } #touchUi .tJournal { left: 170px; }
+  #touchUi.m-story .tFire .i-gun, #touchUi:not(.m-story) .tFire .i-blade { display: none; }
+  body.touch .hud .vitals { left: 50%; right: auto; top: 36px; bottom: auto; width: 220px; transform: translateX(-50%); }
+  body.touch .hud .mats { top: 62px; }
+  body.touch .storyObj { top: 66px; max-width: 40vw; }
+  body.touch .hud .storyStealth { left: 50%; bottom: auto; top: 60px; transform: translateX(-50%); }
+  body.touch .hud .prompt, body.touch .storyPrompt { white-space: normal; width: max-content; max-width: 44vw; text-align: center; font-size: 13px; }
+  body.touch .hud .prompt kbd, body.touch .storyPrompt kbd { display: none; }
 </style>
 </head>
 <body>
@@ -734,6 +839,8 @@
   </footer>
 </div>
 <script src="three.min.js"></script>
+<script src="vendor/three/GLTFLoader.js"></script>
+<script src="vendor/three/SkeletonUtils.js"></script>
 <script src="js/constants.js"></script>
 <script src="vendor/peerjs.min.js"></script>
 <script src="js/core/rng.js"></script>
@@ -767,6 +874,7 @@
 <script src="js/render/icons.js"></script>
 <script src="js/render/overlays.js"></script>
 <script src="js/render/looks.js"></script>
+<script src="js/render/humans.js"></script>
 <script src="js/render/models.js"></script>
 <script src="js/render/viewmodel.js"></script>
 <script src="js/render/effects.js"></script>

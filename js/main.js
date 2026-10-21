@@ -50,6 +50,10 @@
   const qualityName = () => (CONFIG.QUALITY[settings.quality] ? settings.quality : autoQuality);
   const preset = () => CONFIG.QUALITY[qualityName()];
   let post = null;                        // the Ultra preset's post-processing (render/post.js), made the first time it is needed
+  // real people (render/humans.js): on every preset but Low, and not on software rendering (too slow to skin);
+  // ?humans=1 / ?humans=0 decide for tests
+  const softwareGpu = /swiftshader|llvmpipe|software/i.test(gpuName);
+  const humansWanted = () => (params.has('humans') ? params.get('humans') === '1' : qualityName() !== 'low' && !softwareGpu);
   const dynRes = { scale: 1, slow: 0, fast: 0, ema: 16 };
   function basePixelRatio() { return Math.min(window.devicePixelRatio || 1, preset().pixelRatio); }
   function applyPixelRatio() {
@@ -72,6 +76,9 @@
     sky.clouds = p.clouds || 0;
     dynRes.scale = 1;
     applyTextureQuality();
+    HumanModels.setEnabled(humansWanted());
+    if (HumanModels.enabled) HumanModels.load();
+    if (startStage.model && startStage.model.gen !== HumanModels.generation) startStage.setLook(settings.look);
     if (!start) {
       settings.renderDistance = p.rd; saveSettings(settings);
       const rd = document.getElementById('rd'); if (rd) { rd.value = p.rd; document.getElementById('rdVal').textContent = p.rd + ' ch'; }
@@ -94,6 +101,9 @@
   renderer.autoClear = false;            // each view clears its own rectangle; the viewmodel draws on top
   renderer.info.autoReset = false;       // count every pass in the debug panel
   const scene = new THREE.Scene();
+  // the haze the terrain shaders fade into, for everything else (people, items, effects): what the land hides, hides
+  // them too. setFog keeps it in step; markers you must see from afar (the storm, loot beams) opt out with fog: false.
+  scene.fog = new THREE.Fog(0xffffff, 40, 100);
 
   const atlas = buildAtlasTexture();
   const materials = createChunkMaterials(atlas);
@@ -128,6 +138,7 @@
   startStage.setLook(settings.look);
   startStage.setHeld(makeStack('longsword'));
   menu.lookChanged = (look) => startStage.setLook(look);
+  HumanModels.onReady(() => startStage.setLook(settings.look));     // the real person replaces the drawn one on the stage
   /** Player 2 (the gamepad) wears a different accent and top so the two are easy to tell apart. */
   const p2Look = () => PLAYER_LOOK.normalize(Object.assign({}, settings.look, {
     accent: (settings.look.accent + 3) % LOOK_ACCENTS.length, top: (settings.look.top + 4) % LOOK_TOPS.length,
@@ -143,6 +154,7 @@
 
   let game = null;
   let state = 'menu';            // menu | loading | playing
+  let loadingSince = 0;          // when the loading screen went up (story waits a while for the real people)
   let spawnReady = false;
   let accumulator = 0;
   let resultsAt = Infinity, resultsShown = false;
@@ -171,6 +183,9 @@
     const M = mats();
     M.shared.uFogFar.value = far;
     M.shared.uFogNear.value = underwater ? 0.5 : far * CONFIG.FOG.NEAR_FRACTION;
+    scene.fog.color.copy(M.shared.uFogColor.value);
+    scene.fog.near = M.shared.uFogNear.value;
+    scene.fog.far = far;
   }
   /** Story mode: the sun's shadow map for this frame, centred on the first view; off when the preset has none. */
   function updateSunShadow(camera) {
@@ -178,7 +193,24 @@
     if (!M.story || !size) { if (M.shared.uShadowOn) M.shared.uShadowOn.value = 0; return; }
     if (!sunShadow || sunShadow.size !== size || sunShadow.extent !== extent) { if (sunShadow) sunShadow.dispose(); sunShadow = new SunShadow(size, extent); }
     sunShadow.bind(M.shared);
-    sunShadow.render(renderer, scene, M.shared, camera);
+    sunShadow.render(renderer, scene, M.shared, camera, M.propDepth);
+  }
+  let ocean = null;                       // story: the sea out to the horizon (the story materials' `ocean`)
+  const OCEAN_FAR = 1300;                 // story cameras see this far: the ocean fades into the haze before it ends
+  /** Story mode: the far ocean under this view and a camera that reaches the horizon; the other modes end at the fog. */
+  function updateOcean(camera, underwater) {
+    const M = mats(), far = M.ocean ? OCEAN_FAR : effectiveRd * CONFIG.CHUNK_SIZE + 48;
+    if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
+    if (!M.ocean) { if (ocean) ocean.visible = false; return; }
+    if (!ocean) {
+      ocean = new THREE.Mesh(new THREE.PlaneGeometry(2 * OCEAN_FAR, 2 * OCEAN_FAR).rotateX(-Math.PI / 2), M.ocean);
+      ocean.frustumCulled = false;
+      ocean.renderOrder = 0.5;            // under the chunks' water (renderOrder 1), which blends over it
+      scene.add(ocean);
+    }
+    ocean.visible = !underwater;
+    ocean.position.set(camera.position.x, CONFIG.SEA_LEVEL - 0.2, camera.position.z);
+    M.ocean.uniforms.uCam.value.set(camera.position.x, camera.position.z);
   }
   function applyDistance() {
     for (const v of views) { v.camera.far = effectiveRd * CONFIG.CHUNK_SIZE + 48; v.camera.updateProjectionMatrix(); }
@@ -374,6 +406,7 @@
     spawnReady = false;
     accumulator = 0;
     state = 'loading';
+    loadingSince = performance.now();
     window.__game = game;      // for console debugging and tests
     if (netRole === 'host') net.attach(game);
     if (game.rules.story) {
@@ -518,6 +551,7 @@
     effects.attach(game, me);
     Sound.attach(game, [{ camera: views[0].camera, character: me }]);
     state = 'loading';
+    loadingSince = performance.now();
     spawnReady = true;
     accumulator = 0;
     window.__game = game;
@@ -674,7 +708,7 @@
           game.story.start(game.matchHumans.concat(netRole === 'host' && net ? net.remoteCharacters() : []));
           views[0].match.buildMap(game, effects.tileColors);
           document.body.classList.add('match');
-        } else if (game.story && game.world.isAreaMeshed(Math.floor(game.player.pos.x / 16), Math.floor(game.player.pos.z / 16), 2)) {
+        } else if (game.story && (!HumanModels.pending() || performance.now() - loadingSince > 20000) && game.world.isAreaMeshed(Math.floor(game.player.pos.x / 16), Math.floor(game.player.pos.z / 16), 2)) {
           state = 'playing';
           kbm.flush();
           input.takeFrame();
@@ -760,6 +794,7 @@
     } else {
     // Ultra: every view draws into the post-processing image, which is finished onto the canvas below
     const pp = preset().post ? post : null;
+    sky.skyMask = pp ? 1 : 0;
     if (pp) pp.begin(window.innerWidth, window.innerHeight, Math.max(renderer.getPixelRatio(), preset().post.ssaa) * dynRes.scale);
     else {
       renderer.setScissorTest(false);
@@ -772,6 +807,7 @@
       setFog(underwater);
       sky.camera = v.camera;
       if (mats().shared.uTime) mats().shared.uTime.value = now / 1000;
+      updateOcean(v.camera, underwater);          // first: the sky dome is sized from the camera's reach
       sky.update(game ? game.timeOfDay : CONFIG.TIME.START, mats().shared, underwater);
       if (v === active[0]) updateSunShadow(v.camera);
       v.viewmodel.light.copy(mats().shared.uLight.value);

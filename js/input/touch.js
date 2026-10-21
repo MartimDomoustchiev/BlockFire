@@ -18,7 +18,28 @@
  * button on the Input object (or dispatches the same key event the
  * keyboard would), and the stick and the look drags feed the same
  * analogue move and mouse motion. Keyboard and gamepad keep working.
+ * The buttons show drawn icons (TOUCH_ICONS, 24x24 line art) with the
+ * name as their title; FIRE shows a blade in story mode, a sight elsewhere.
  * ============================================================ */
+const TOUCH_ICONS = {
+  gun: '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/><circle class="f" cx="12" cy="12" r="1.4"/>',
+  blade: '<path d="M12 2.5l2.2 3.2v9.8H9.8V5.7z"/><path d="M7 15.5h10M12 15.5v4.5M10.4 21.5h3.2"/>',
+  aim: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/>',
+  jump: '<path d="M6 13l6-6 6 6"/><path d="M6 19l6-6 6 6"/>',
+  reload: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.8 3.8v4.6h-4.6"/>',
+  use: '<path d="M8.5 12.5V5.8a1.5 1.5 0 0 1 3 0V11"/><path d="M11.5 10.5V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14.5 10.8V6.3a1.5 1.5 0 0 1 3 0v7.2c0 4-2.6 7-6.4 7-2.6 0-4.1-1.4-5.4-3.4L3.7 13.3a1.5 1.5 0 0 1 2.4-1.7l2.4 2.8"/>',
+  crouch: '<path d="M6 6l6 6 6-6"/><path d="M5 18.5h14"/>',
+  next: '<path d="M4 8.5h13.5M14 5l3.5 3.5L14 12"/><path d="M20 15.5H6.5M10 12l-3.5 3.5L10 19"/>',
+  gear: '<path d="M12 2.8l7.5 2.8v5.6c0 4.8-3.2 8.3-7.5 10-4.3-1.7-7.5-5.2-7.5-10V5.6z"/><path d="M12 7v9"/>',
+  map: '<path d="M3.5 6.2l5.5-2.2 6 2.2 5.5-2.2v13.8L15 20l-6-2.2-5.5 2.2z"/><path d="M9 4v13.8M15 6.2V20"/>',
+  journal: '<path d="M12 6.5c-2.2-1.6-5.2-2-8.5-1.5v13c3.3-.5 6.3-.1 8.5 1.5 2.2-1.6 5.2-2 8.5-1.5V5c-3.3-.5-6.3-.1-8.5 1.5z"/><path d="M12 6.5v13"/>',
+  fly: '<path d="M12 19V6M7 10.5L12 5.5l5 5"/><path d="M3 15c3-.2 5.2.8 6.5 2.5M21 15c-3-.2-5.2.8-6.5 2.5"/>',
+  inv: '<rect x="4.5" y="7.5" width="15" height="12.5" rx="2"/><path d="M9 7.5V5.8A1.8 1.8 0 0 1 10.8 4h2.4A1.8 1.8 0 0 1 15 5.8v1.7M4.5 12.5h15M11 12.5v2h2v-2"/>',
+  build: '<path d="M4 20h16M6 20v-5h5v5M11 15V9h5v11M13 9V4h5v5"/>',
+  menu: '<path d="M5 7h14M5 12h14M5 17h14"/>',
+};
+const touchIcon = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true" class="i-' + name + '">' + TOUCH_ICONS[name] + '</svg>';
+
 class TouchUI {
   constructor(input, settings, hooks) {
     this.input = input;
@@ -34,20 +55,20 @@ class TouchUI {
     this.root.innerHTML =
       '<div class="tLook"></div>' +
       '<div class="tStick"><i></i></div>' +
-      '<button class="tBtn tFire" data-b="0">FIRE</button>' +
-      '<button class="tBtn tAim" data-b="2">AIM</button>' +
-      '<button class="tBtn tJump" data-k="Space">JUMP</button>' +
-      '<button class="tBtn tReload" data-p="KeyR">RELOAD</button>' +
-      '<button class="tBtn tUse" data-p="KeyE">USE</button>' +
-      '<button class="tBtn tCrouch" data-k="KeyC">CROUCH</button>' +
-      '<button class="tBtn tNext" data-w="1">NEXT</button>' +
-      '<button class="tBtn tGear" data-p="Tab" data-mode="story">GEAR</button>' +
-      '<button class="tBtn tMap" data-p="KeyM" data-mode="story">MAP</button>' +
-      '<button class="tBtn tJournal" data-p="KeyJ" data-mode="story">JOURNAL</button>' +
-      '<button class="tBtn tFly" data-p="KeyF" data-mode="sandbox build">FLY</button>' +
-      '<button class="tBtn tInv" data-p="Tab" data-mode="arena sandbox build">INV</button>' +
-      '<button class="tBtn tBuild" data-p="KeyQ" data-mode="build">BUILD</button>' +
-      '<button class="tBtn tMenu" data-menu="1">MENU</button>';
+      '<button class="tBtn tFire" data-b="0" title="Fire / strike">' + touchIcon('gun') + touchIcon('blade') + '</button>' +
+      '<button class="tBtn tAim" data-b="2" title="Aim / block">' + touchIcon('aim') + '</button>' +
+      '<button class="tBtn tJump" data-k="Space" title="Jump / climb">' + touchIcon('jump') + '</button>' +
+      '<button class="tBtn tReload" data-p="KeyR" title="Reload">' + touchIcon('reload') + '</button>' +
+      '<button class="tBtn tUse" data-p="KeyE" title="Use">' + touchIcon('use') + '</button>' +
+      '<button class="tBtn tCrouch" data-k="KeyC" title="Crouch / sneak">' + touchIcon('crouch') + '</button>' +
+      '<button class="tBtn tNext" data-w="1" title="Next item">' + touchIcon('next') + '</button>' +
+      '<button class="tBtn tGear" data-p="Tab" data-mode="story" title="Gear">' + touchIcon('gear') + '</button>' +
+      '<button class="tBtn tMap" data-p="KeyM" data-mode="story" title="Map">' + touchIcon('map') + '</button>' +
+      '<button class="tBtn tJournal" data-p="KeyJ" data-mode="story" title="Journal">' + touchIcon('journal') + '</button>' +
+      '<button class="tBtn tFly" data-p="KeyF" data-mode="sandbox build" title="Fly">' + touchIcon('fly') + '</button>' +
+      '<button class="tBtn tInv" data-p="Tab" data-mode="arena sandbox build" title="Inventory">' + touchIcon('inv') + '</button>' +
+      '<button class="tBtn tBuild" data-p="KeyQ" data-mode="build" title="Build">' + touchIcon('build') + '</button>' +
+      '<button class="tBtn tMenu" data-menu="1" title="Menu">' + touchIcon('menu') + '</button>';
     document.body.appendChild(this.root);
     this.stick = this.root.querySelector('.tStick');
     this.stickKnob = this.stick.querySelector('i');
@@ -67,6 +88,7 @@ class TouchUI {
   setMode(mode) {
     this.mode = mode;
     for (const el of this.root.querySelectorAll('[data-mode]')) el.hidden = !el.dataset.mode.split(' ').includes(mode);
+    this.root.classList.toggle('m-story', mode === 'story');           // FIRE's icon: a blade in story, a sight elsewhere
   }
 
   /** Shown while playing with nothing else open. */
@@ -105,6 +127,8 @@ class TouchUI {
       el.addEventListener('pointerup', up);
       el.addEventListener('pointercancel', up);
       el.addEventListener('lostpointercapture', up);
+      // no click after the finger lifts: GEAR or MAP opens a screen under the finger, and that click would close it again
+      el.addEventListener('touchend', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
     }
     // stick
     this.stick.addEventListener('pointerdown', (e) => {

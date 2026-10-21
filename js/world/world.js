@@ -332,6 +332,7 @@ class World {
     g.setAttribute('tile', new THREE.BufferAttribute(m.tile, 1));
     g.setAttribute('shade', new THREE.BufferAttribute(m.shade, 1));
     if (m.normal) g.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3));
+    if (m.edge) g.setAttribute('edge', new THREE.BufferAttribute(m.edge, 4));
     g.setIndex(new THREE.BufferAttribute(m.index, 1));
     // Chunk-local bounds so three.js can frustum-cull without scanning vertices.
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, 32, 8), 36);
@@ -372,6 +373,7 @@ class World {
     g.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3));
     g.setAttribute('color', new THREE.BufferAttribute(m.color, 3));
     g.setAttribute('sway', new THREE.BufferAttribute(m.sway, 1));
+    g.setAttribute('tex', new THREE.BufferAttribute(m.tex, 3));
     g.setIndex(new THREE.BufferAttribute(m.index, 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, 36, 8), 40);
     const mesh = new THREE.Mesh(g, material);
@@ -379,7 +381,7 @@ class World {
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
     mesh.renderOrder = 0;
-    mesh.layers.enable(SHADOW_LAYER);
+    mesh.layers.enable(PROP_SHADOW_LAYER);          // casts with its own depth material, so the leaflets' gaps let the sun through
     this.scene.add(mesh);
     return mesh;
   }

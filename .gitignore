@@ -13,9 +13,13 @@ desktop.ini
 *~
 .vscode/
 .idea/
+# numbered copies made by iCloud Drive / Finder ("config 2.xml"): a space in an Android resource name breaks the build
+* [2-9].*
+* [2-9]
 
 # Tooling
 node_modules/
+
 *.log
 .env
 

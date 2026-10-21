@@ -101,14 +101,17 @@ function createStoryMaterials(atlas) {
   const voxelVertex = `
     attribute float tile;
     attribute float shade;
+    attribute vec4 edge;
     varying vec2 vUv;
     varying float vTile;
     varying float vShade;
     varying float vDepth;
     varying vec3 vN;
     varying vec3 vWorld;
+    varying vec4 vEdge;
     void main() {
       vUv = uv;
+      vEdge = edge;
       vTile = tile;
       vShade = shade;
       vN = normal;
@@ -132,6 +135,7 @@ function createStoryMaterials(atlas) {
     varying float vDepth;
     varying vec3 vN;
     varying vec3 vWorld;
+    varying vec4 vEdge;
     ${common}
     void main() {
       float t = floor(vTile + 0.5);
@@ -151,9 +155,32 @@ function createStoryMaterials(atlas) {
       vec4 c = textureGrad(uAtlas, auv, gx * k * toAtlas, gy * k * toAtlas);
       if (c.a < uAlphaTest) discard;
       vec3 n = normalize(vN);
+      vec3 W = vWorld;
+      // the face's own axes (as the mesher lays them out: x faces run y, z; y faces z, x; z faces x, y)
+      vec3 an = abs(n);
+      vec3 U = an.x > 0.5 ? vec3(0.0, 1.0, 0.0) : an.y > 0.5 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+      vec3 V = an.x > 0.5 ? vec3(0.0, 0.0, 1.0) : an.y > 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+      // outside corners are rounded and worn: within a few centimetres of one the surface turns towards the neighbouring
+      // face (half way at the corner, where it meets that face turning back), its width wanders along the edge
+      float bw = 0.045 + 0.075 * vnoise(W.xz * 2.3 + W.y * 1.7);
+      vec4 e = clamp(1.0 - vEdge / bw, 0.0, 1.0);
+      e = e * e * (3.0 - 2.0 * e);
+      vec3 bent = n * (1.0 - 0.35 * max(max(e.x, e.y), max(e.z, e.w))) - U * e.x + U * e.y - V * e.z + V * e.w;
+      float worn = max(max(e.x, e.y), max(e.z, e.w));
+      n = normalize(bent);
+      // weathering: large patches of warmer and paler stone, darker streaks run down from ledges, sand settles on what
+      // faces up, and the worn corners are rubbed lighter
+      float big = vnoise(W.xz * 0.11 + W.y * 0.05) * 0.6 + vnoise(W.xz * 0.37 - W.y * 0.13) * 0.4;
+      vec3 rgb0 = c.rgb * mix(vec3(0.9, 0.9, 0.93), vec3(1.07, 1.02, 0.94), big);
+      float along = dot(W, U + V) - dot(W, vec3(0.0, 1.0, 0.0)) * (an.y > 0.5 ? 0.0 : 1.0);
+      float streak = an.y > 0.5 ? 0.0 : smoothstep(0.55, 0.85, vnoise(vec2(along * 3.1, W.y * 0.35))) * smoothstep(0.3, 0.7, vnoise(vec2(along * 0.7, W.y * 0.2 + 3.0)));
+      rgb0 *= 1.0 - 0.16 * streak;
+      float dust = n.y > 0.6 ? smoothstep(0.35, 0.75, vnoise(W.xz * 1.7)) * 0.55 : 0.0;
+      rgb0 = mix(rgb0, vec3(0.86, 0.75, 0.55), dust);
+      rgb0 *= 1.0 + 0.1 * worn;
       // a faint, world-space mottling so repeated blocks do not read as a grid
-      float mott = 0.93 + 0.07 * sin(vWorld.x * 0.31 + vWorld.z * 0.27) + 0.07 * sin(vWorld.z * 0.23 - vWorld.y * 0.41);
-      vec3 rgb = c.rgb * mott * lightAt(n, vShade, shadowAt(vWorld, n));
+      float mott = 0.95 + 0.05 * sin(vWorld.x * 0.31 + vWorld.z * 0.27) + 0.05 * sin(vWorld.z * 0.23 - vWorld.y * 0.41);
+      vec3 rgb = rgb0 * mott * lightAt(n, mix(vShade, 1.0, worn * 0.5), shadowAt(vWorld, normalize(vN)));
       rgb = haze(tone(rgb), vDepth, vWorld);
       gl_FragColor = vec4(rgb, uAlpha);
     }`;
@@ -222,13 +249,16 @@ function createStoryMaterials(atlas) {
     uniform float uTime;
     attribute vec3 color;
     attribute float sway;
+    attribute vec3 tex;
     varying vec3 vColor;
     varying vec3 vN;
     varying vec3 vWorld;
     varying float vDepth;
+    varying vec3 vTex;
     void main() {
       vColor = color;
       vN = normal;
+      vTex = tex;
       vec4 wp = modelMatrix * vec4(position, 1.0);
       // wind: a slow swell across the land and a quicker flutter, stronger the further a vertex is out along its leaf or stalk
       float w = sin(uTime * 1.3 + wp.x * 0.23 + wp.z * 0.19) * 0.6 + sin(uTime * 2.7 + wp.x * 0.9 + wp.z * 0.6) * 0.25;
@@ -240,20 +270,83 @@ function createStoryMaterials(atlas) {
       gl_Position = projectionMatrix * mv;
     }`;
 
+  // a palm frond (tex.z = 2) is a wide strip: along 0..1 from the base, across -1..1. Its leaflets leave the rachis slanting
+  // towards the tip and narrow to a point; between them the strip is cut away. The cut is widened by the pixel's footprint,
+  // so a far frond turns solid instead of shimmering.
+  const frond = `
+    float frondCut(vec3 t) {
+      if (t.z < 1.5 || t.z > 2.5) return 1.0;
+      float a = abs(t.y);
+      if (a < 0.07) return 1.0;
+      float s = t.x * 30.0 - a * 2.4;
+      float d = abs(fract(s) - 0.5) * 2.0;
+      float aa = fwidth(s) * 1.2;
+      float w = 0.62 * (1.0 - a * 0.75) + aa;
+      return 1.0 - smoothstep(w - aa, w + aa, d);
+    }
+  `;
+
   const propFragment = `
     varying vec3 vColor;
     varying vec3 vN;
     varying vec3 vWorld;
     varying float vDepth;
+    varying vec3 vTex;
     ${common}
+    ${frond}
     void main() {
+      if (frondCut(vTex) < 0.5) discard;
       vec3 n = normalize(vN);
       if (!gl_FrontFacing) n = -n;
       vec3 base = vColor;
-      // thin leaves glow when the sun is behind them
+      float leaf = step(1.5, vTex.z) * (1.0 - step(3.5, vTex.z));
+      float cloth = step(3.5, vTex.z);
+      if (cloth > 0.5) {
+        // linen awnings and blankets: indigo stripes woven in, the weave and a little dust
+        float sp = vTex.x * 4.0;
+        float st = smoothstep(0.46, 0.5, abs(fract(sp) - 0.5)) ;
+        float band = step(0.5, fract(sp * 0.5 + 0.25));
+        vec3 dye = vec3(0.16, 0.3, 0.55);
+        base = mix(base, dye, band * (1.0 - st * 0.5));
+        base *= 0.9 + 0.1 * vnoise(vWorld.xz * 40.0 + vWorld.y * 17.0);
+      } else if (vTex.z > 2.5) {
+        // ivy leaves: each its own shade
+        base *= 0.85 + 0.3 * hash21(floor(vWorld.xz * 9.0) + floor(vWorld.y * 9.0));
+      } else if (vTex.z > 1.5) {
+        // each leaflet its own shade, paler towards its tip; the rachis down the middle is straw coloured
+        float a = abs(vTex.y), s = vTex.x * 30.0 - a * 2.4;
+        base *= 0.86 + 0.26 * hash21(vec2(floor(s) + step(0.0, vTex.y) * 57.0, floor(vTex.x * 3.0)));
+        base *= 0.86 + 0.24 * a;
+        if (a < 0.07) base = mix(base, vec3(0.6, 0.55, 0.36) * (0.5 + dot(vColor, vec3(0.8))), 0.55);
+      } else if (vTex.z > 0.5) {
+        // the trunk: rough, overlapping stubs of old leaf bases, wider than tall, offset row to row and each a little
+        // different, with fibre between them
+        vec2 b = vec2(vTex.x * 6.0, vTex.y * 3.4);
+        float row = floor(b.y);
+        b.x += mod(row, 2.0) * 0.5 + (hash21(vec2(row, 3.0)) - 0.5) * 0.3;
+        vec2 cell = floor(b), f = fract(b) - 0.5;
+        f += (vec2(hash21(cell), hash21(cell + 9.1)) - 0.5) * 0.18;
+        float stub = 1.0 - smoothstep(0.2, 0.5, abs(f.x) * 0.7 + abs(f.y) * 1.1 + vnoise(b * 5.0) * 0.12);
+        base *= (0.78 + 0.26 * stub) * (0.9 + 0.2 * hash21(cell + 4.7));
+        base *= 0.88 + 0.16 * vnoise(vec2(vTex.x * 48.0, vTex.y * 9.0));
+        n = normalize(n + vec3(0.0, -f.y * 0.6 * stub, 0.0));
+      }
+      float sh = shadowAt(vWorld, n);
+      // thin leaves glow when the sun is behind them, and their waxy surface catches a soft sheen
       float back = max(dot(-n, uSunDir), 0.0);
-      vec3 rgb = base * lightAt(n, 0.9, shadowAt(vWorld, n)) + base * uSunColor * back * 0.35;
+      vec3 V = normalize(cameraPosition - vWorld);
+      float sheen = pow(max(dot(n, normalize(uSunDir + V)), 0.0), 24.0) * 0.14 * leaf;
+      vec3 rgb = base * lightAt(n, 0.9, sh) + base * uSunColor * back * (mix(0.15, 0.45, leaf) + cloth * 0.25) * (0.4 + 0.6 * sh) + uSunColor * sheen * sh;
       gl_FragColor = vec4(haze(tone(rgb), vDepth, vWorld), 1.0);
+    }`;
+
+  // the props in the sun's shadow map: the same sway, the same leaflets cut out
+  const propDepthFragment = `
+    varying vec3 vTex;
+    ${frond}
+    void main() {
+      if (frondCut(vTex) < 0.5) discard;
+      gl_FragColor = vec4(1.0);
     }`;
 
   const waterVertex = `
@@ -269,12 +362,25 @@ function createStoryMaterials(atlas) {
       gl_Position = projectionMatrix * mv;
     }`;
 
+  // the same shader draws the far ocean (OCEAN): a plane that follows the camera to the horizon, just under the chunks'
+  // water, fading in from 40 to 64 blocks out (closer in, the shallow sea floor shows through the chunks' water). Under the
+  // land it is hidden by the ground; past the loaded chunks it carries the sea on to the horizon.
   const waterFragment = `
     uniform float uAlpha;
+    #ifdef OCEAN
+    uniform vec2 uCam;
+    #endif
     varying vec3 vWorld;
     varying float vDepth;
     ${common}
     void main() {
+      #ifdef OCEAN
+      float ramp = smoothstep(40.0, 64.0, length(vWorld.xz - uCam));
+      if (ramp <= 0.0) discard;
+      float depth = length(vWorld - cameraPosition);     // the plane's corners are 1300 blocks out: no interpolated distance
+      #else
+      float depth = vDepth;
+      #endif
       vec2 p = vWorld.xz;
       float t = uTime;
       // two sets of slow ripples give the surface its normal
@@ -290,7 +396,15 @@ function createStoryMaterials(atlas) {
       vec3 rgb = mix(body * lightAt(n, 1.0, 1.0), sky, 0.25 + 0.55 * fres);
       vec3 H = normalize(uSunDir + V);
       rgb += uSunColor * pow(max(dot(n, H), 0.0), 90.0) * 1.4;
-      gl_FragColor = vec4(haze(tone(rgb), vDepth, vWorld), mix(uAlpha, 0.96, fres));
+      // the sea's haze is much longer than the land's, so the water runs out to the horizon instead of into a wall of fog
+      vec3 V2 = normalize(vWorld - cameraPosition);
+      vec3 fogc = uFogColor + uSunColor * pow(max(dot(V2, uSunDir), 0.0), 6.0) * 0.3;
+      vec3 c = mix(tone(rgb), fogc, 1.0 - exp(-depth * 0.0028));
+      #ifdef OCEAN
+      gl_FragColor = vec4(c, mix(uAlpha, 0.96, fres) * ramp);
+      #else
+      gl_FragColor = vec4(c, mix(uAlpha, 0.96, fres));
+      #endif
     }`;
 
   const make = (vs, fs, extra, o) => new THREE.ShaderMaterial(Object.assign({
@@ -304,6 +418,9 @@ function createStoryMaterials(atlas) {
     opaque: make(voxelVertex, voxelFragment, { uAlpha: { value: 1.0 }, uAlphaTest: { value: 0.5 } }, { transparent: false, depthWrite: true }),
     ground: make(groundVertex, groundFragment, {}, { transparent: false, depthWrite: true }),
     prop: make(propVertex, propFragment, {}, { transparent: false, depthWrite: true, side: THREE.DoubleSide }),
+    propDepth: make(propVertex, propDepthFragment, {}, { transparent: false, depthWrite: true, colorWrite: false, side: THREE.DoubleSide }),
     water: make(waterVertex, waterFragment, { uAlpha: { value: 0.72 } }, { transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+    ocean: make(waterVertex, waterFragment, { uAlpha: { value: 0.92 }, uCam: { value: new THREE.Vector2() } },
+      { transparent: true, depthWrite: false, defines: { OCEAN: '' } }),
   };
 }

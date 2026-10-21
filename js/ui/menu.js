@@ -41,6 +41,7 @@ const MODE_CARDS = {
 
 /** The look editor: which field of PLAYER_LOOK each row changes, and how it is shown. */
 const LOOK_ROWS = [
+  { key: 'body', label: 'Body', kind: 'chip', values: PLAYER_LOOK.BODY, text: (v) => v },
   { key: 'skin', label: 'Skin', kind: 'swatch', values: PLAYER_LOOK.SKINS, title: (v) => 'skin tone ' + (v + 1) },
   { key: 'style', label: 'Hair', kind: 'chip', values: PLAYER_LOOK.STYLES, text: (v) => v },
   { key: 'hair', label: 'Hair colour', kind: 'swatch', values: PLAYER_LOOK.HAIR.map((h) => h.color), title: (v) => PLAYER_LOOK.HAIR[v].name },

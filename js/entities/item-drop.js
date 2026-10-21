@@ -195,7 +195,7 @@ const DropVisuals = {
     let mats = this.beamMats[rarity];
     if (!mats) {
       const col = new THREE.Color(CONFIG.RARITY[rarity].color);
-      const opts = { color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide };
+      const opts = { color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false };
       mats = this.beamMats[rarity] = [new THREE.MeshBasicMaterial(Object.assign({ opacity: 0.26 }, opts)),
         new THREE.MeshBasicMaterial(Object.assign({ opacity: 0.6 }, opts))];
     }

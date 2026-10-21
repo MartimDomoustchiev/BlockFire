@@ -221,6 +221,7 @@ class Character extends Entity {
       if (this.model) this.model.root.visible = false;
       return;
     }
+    if (this.model && this.model.gen !== HumanModels.generation) { this.model.dispose(); this.model = null; }     // real people arrived (render/humans.js)
     if (!this.model) {
       this.model = new CharacterModel(this, game.scene);
       // a local player's own body is on its own layer, hidden from their camera only (split-screen sees the other)

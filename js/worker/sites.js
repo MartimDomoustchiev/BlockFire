@@ -587,7 +587,7 @@ WorkerBundle.add(function sitesPart() {
     for (let y = F + 1; y <= F + 5; y++) for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
       if (x !== x0 && x !== x1 && z !== z0 && z !== z1) continue;
       const broken = y >= F + 3 && rnd() < (y - F - 2) * 0.22;
-      if (!broken) put(x, y, z, rnd() < 0.15 ? ID.STONE : ID.COBBLE);
+      if (!broken) put(x, y, z, rnd() < 0.15 ? ID.BUILD_STONE : ID.COBBLE);
       else if (y === F + 3 && rnd() < 0.5) put(x, y, z, ID.LEAVES);
     }
     for (let x = x0 + 2; x <= x1 - 2; x += 3) { put(x, F + 6, z0, ID.TIMBER); put(x, F + 6, z1, ID.TIMBER); }
