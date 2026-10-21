@@ -2,13 +2,14 @@
 WorkerBundle.add(function terrainPart() {
   const CS = 16, CH = 64;
   const BIOME_GRASS = 0, BIOME_DESERT = 1, BIOME_SNOW = 2, BIOME_FOREST = 3;
-  let ID = null, SEA = 20, SEED = 0, CHEST_CHANCE = 0, ISLAND = 0;
+  let ID = null, SEA = 20, SEED = 0, CHEST_CHANCE = 0, ISLAND = 0, STORY = false;
   let nTerrain, nDetail, nMount, nTemp, nMoist, nCave, nOre;
 
   function setupTerrain(ids, sea, seed, cfg) {
     ID = ids; SEA = sea; SEED = seed | 0;
     CHEST_CHANCE = (cfg && cfg.chestChance) || 0;
     ISLAND = (cfg && cfg.island) || 0;           // >0: radius of the battle island
+    STORY = !!(cfg && cfg.story);                // the story's land: desert, fields, palms (no snow, no cubes of leaves)
     nTerrain = makeNoise(SEED);
     nDetail = makeNoise(SEED + 101);
     nMount = makeNoise(SEED + 202);
@@ -59,6 +60,30 @@ WorkerBundle.add(function terrainPart() {
     if (b === BIOME_DESERT) return ID.SAND;
     if (b === BIOME_SNOW) return ID.SNOW;
     return ID.GRASS;
+  }
+
+  /**
+   * Story mode's ground: sand dunes, green fields on the low wet ground, bare limestone where the slope is steep or the
+   * land is high. `slope` is the largest drop to a neighbouring column (0 where it is not known).
+   */
+  function storyTop(x, z, h, slope) {
+    if (h <= SEA + 1) return h >= SEA - 6 ? ID.SAND : ID.DIRT;       // shores and river beds
+    if (slope >= 2 || h >= 46) return ID.STONE;
+    const m = fbm2(nMoist, x * 0.012 + 300, z * 0.012, 3);
+    if (h <= SEA + 7 && m > -0.05) return ID.GRASS;                  // the irrigated strip along the water
+    if (m > 0.3 && h <= SEA + 15) return ID.GRASS;                   // an oasis
+    return ID.SAND;
+  }
+  function storySub(top) { return top === ID.GRASS ? ID.DIRT : top === ID.STONE ? ID.STONE : ID.SAND; }
+
+  /** Story mode: 1 = a palm. Groves in the green, palms along the water, the odd lone palm in the desert. */
+  function storyTreeKind(x, z, h, top) {
+    if (h <= SEA + 1 || h >= 46) return 0;
+    if (siteClear(x, z)) return 0;
+    const r = (hash2(x, z, SEED) & 0xffff) / 65536;
+    if (top === ID.GRASS) return r < 0.05 ? 1 : 0;
+    if (top === ID.SAND) return r < (h <= SEA + 6 ? 0.018 : 0.0016) ? 1 : 0;
+    return 0;
   }
 
   function subBlock(h, b) {
@@ -114,7 +139,11 @@ WorkerBundle.add(function terrainPart() {
         const h = Hs[e], b = Bs[e];
         const wx = cx * CS + x, wz = cz * CS + z;
         const road = roadSurface(wx, wz, h);
-        const top = road === 1 ? ID.PATH : topBlock(h, b), sub = subBlock(h, b);
+        let top, sub;
+        if (STORY) {
+          const slope = Math.max(Math.abs(h - Hs[e - 1]), Math.abs(h - Hs[e + 1]), Math.abs(h - Hs[e - E]), Math.abs(h - Hs[e + E]));
+          top = road === 1 ? ID.PATH : storyTop(wx, wz, h, slope); sub = storySub(top === ID.PATH ? ID.SAND : top);
+        } else { top = road === 1 ? ID.PATH : topBlock(h, b); sub = subBlock(h, b); }
         const yMax = Math.max(h, SEA);
         if (road === 2) data[x + z * CS + (SEA + 1) * 256] = ID.PLANKS;     // bridge deck over water
         for (let y = 0; y <= yMax; y++) {
@@ -145,10 +174,18 @@ WorkerBundle.add(function terrainPart() {
     for (let ez = 0; ez < E; ez++) {
       for (let ex = 0; ex < E; ex++) {
         const h = Hs[ez * E + ex];
-        const kind = treeKind(ox + ex, oz + ez, h, Bs[ez * E + ex]);
+        let kind;
+        if (STORY) {
+          const inner = ex > 0 && ez > 0 && ex < E - 1 && ez < E - 1;
+          const slope = inner ? Math.max(Math.abs(h - Hs[ez * E + ex - 1]), Math.abs(h - Hs[ez * E + ex + 1]), Math.abs(h - Hs[(ez - 1) * E + ex]), Math.abs(h - Hs[(ez + 1) * E + ex])) : 0;
+          kind = storyTreeKind(ox + ex, oz + ez, h, storyTop(ox + ex, oz + ez, h, slope));
+          // reeds on the dry shore: a bush block each (the smooth mesher draws them as reeds, and they hide you as before)
+          if (!kind && h >= SEA + 1 && h <= SEA + 2 && inner && !siteClear(ox + ex, oz + ez) && (hash2(ox + ex * 7, oz + ez * 3, SEED ^ 0x3b1) & 0xffff) / 65536 < 0.1) put(ox + ex, h + 1, oz + ez, ID.BUSH, false);
+        } else kind = treeKind(ox + ex, oz + ez, h, Bs[ez * E + ex]);
         if (!kind) continue;
         const wx = ox + ex, wz = oz + ez;
         const rh = hash2(wx * 3 + 1, wz * 5 + 2, SEED);
+        if (STORY) { const th = 4 + rh % 3; for (let k = 1; k <= th; k++) put(wx, h + k, wz, ID.PALM, false); continue; }       // the trunk's collider; the mesher draws the palm
         if (kind === 2) {
           const ch = 1 + rh % 3;
           for (let k = 1; k <= ch; k++) put(wx, h + k, wz, CACTUS, false);

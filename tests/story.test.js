@@ -422,7 +422,7 @@ exports.tests = {
       return out;
     });
     ctx.assert(m.guardParts >= 14 && m.guardVerts > 1500 && m.knees, 'a jointed, rounded body (not a few boxes): ' + JSON.stringify(m));
-    ctx.assert(m.lit === 'MeshLambertMaterial' && m.lights.includes('HemisphereLight') && m.lights.includes('DirectionalLight'), 'lit by sun and sky: ' + JSON.stringify(m));
+    ctx.assert(m.lit === 'MeshPhongMaterial' && m.lights.includes('HemisphereLight') && m.lights.includes('DirectionalLight'), 'lit by sun and sky: ' + JSON.stringify(m));
     // third person by default in story mode: our own body is drawn, the camera sits behind it and aims where we aim
     const cam = () => page.evaluate(() => {
       const g = __game, p = g.player, v = __views[0], c = v.camera;
@@ -496,8 +496,18 @@ exports.tests = {
       p.yaw = Math.atan2(-(T.hay.x - T.top.x), -(T.hay.z - T.top.z));
       __step(10); __step(20, { moveZ: 1 }); __step(180); out.objs.push(__obj());
       const bully = st.activity.M.bully;
-      p.teleport(bully.pos.x + Math.sin(bully.yaw) * 1.5, bully.pos.y, bully.pos.z + Math.cos(bully.yaw) * 1.5);
-      p.yaw = bully.yaw; p.selectSlot(0);
+      bully.controller.look = () => {};        // hold still (his idle sway would turn him away)
+      // stand on a free, level cell with a clear line to him, facing him (walls and stalls block the blade)
+      let ok = false;
+      for (const d of [1.5, 2, 1.2, 2.5]) for (let k = 0; k < 16 && !ok; k++) {
+        const a = k / 16 * Math.PI * 2, x = Math.floor(bully.pos.x + Math.cos(a) * d), z = Math.floor(bully.pos.z + Math.sin(a) * d);
+        const w = g.world;
+        if (!(w.isSolid(x, Math.floor(bully.pos.y) - 1, z) && !w.isSolid(x, Math.floor(bully.pos.y), z) && !w.isSolid(x, Math.floor(bully.pos.y) + 1, z))) continue;
+        p.teleport(x + 0.5, bully.pos.y, z + 0.5);
+        p.yaw = Math.atan2(-(bully.pos.x - p.pos.x), -(bully.pos.z - p.pos.z)); p.selectSlot(0);
+        ok = Blade.reach(g, p, bully) && Blade.inFront(g, p, 3.0) === bully;
+      }
+      if (!ok) throw new Error('no clear spot to strike the bully from');
       __step(3); __step(1, { fire: true, firePressed: true }); __step(20);
       out.objs.push(__obj());
       __beside(w, en); __step(3); __step(1, { interact: true }); __step(10);
@@ -509,7 +519,8 @@ exports.tests = {
     ctx.assert(/Talk to Old Wren/.test(r.prompt), 'prompt to talk: ' + r.prompt);
     ctx.assert(/Climb the watchtower/.test(r.objs[0]) && /Synchronize/.test(r.objs[1]) && /leap of faith/.test(r.objs[2]) &&
       /Take down/.test(r.objs[3]) && /Return to Old Wren/.test(r.objs[4]), 'objectives in order: ' + JSON.stringify(r.objs));
-    ctx.assert(r.chapter === 1 && r.silver === 50 && r.arrows === 12 && r.bow === 1 && r.sword === 1 && r.synced === 1, 'chapter done, rewarded: ' + JSON.stringify(r));
+    // 50 for the chapter, and 20 more for First Blood (the first takedown is a challenge too)
+    ctx.assert(r.chapter === 1 && r.silver === 70 && r.arrows === 12 && r.bow === 1 && r.sword === 1 && r.synced === 1, 'chapter done, rewarded: ' + JSON.stringify(r));
     ctx.assert(r.save && r.save.chapter === 1 && r.save.synced.length === 1, 'progress saved: ' + JSON.stringify(r.save));
     await page.evaluate(() => { __game.paused = false; });
     await page.waitForTimeout(600);
@@ -706,11 +717,21 @@ exports.tests = {
     });
     await client.waitForFunction(() => __game.story.promptFor() && /Old Wren/.test(__game.story.promptFor().text), null, { timeout: 8000 });
     await client.evaluate(`(${DRIVE})({})`);
+    // the friend's game starts ticking once its area is meshed: a software-rendered browser can take a while over that
+    await client.waitForFunction(() => __game.tickCount > 0, null, { timeout: 120000, polling: 250 });
     await client.evaluate(() => { window.__once = { interact: true }; });
     await host.waitForFunction(() => __game.story.activity && __game.story.activity.kind === 'chapter', null, { timeout: 8000 });
     await client.waitForFunction(() => /Climb the watchtower/.test(__game.story.objective().text), null, { timeout: 8000 });
     await host.evaluate(() => __game.story.addSilver(30));
     await client.waitForFunction(() => __game.story.silver === 30, null, { timeout: 5000 });
+    // the journal and the gear screen read stats, letters, challenges and nearForge: a client's mirror has them too
+    await host.evaluate(() => { const S = __game.story; S.stats.kills = 3; S.letters.add(2); S.challengesDone.add('first'); S.flags.sealed = true; S.version++; });
+    await client.waitForFunction(() => __game.story.stats.kills === 3 && __game.story.letters.has(2) && __game.story.challengesDone.has('first') && __game.story.flags.sealed, null, { timeout: 5000 });
+    const jr = await client.evaluate(() => {
+      const st = __game.story, html = window.__screens.journalHTML(st);
+      return { tally: /kills 3/.test(html), letter: st.letters.has(2) && /letters \d+\/12/.test(html), challenge: /challenges 1\/37/.test(html), forge: st.nearForge(__game.player) === false };
+    });
+    ctx.assert(jr.tally && jr.letter && jr.challenge && jr.forge, 'the journal on a client shows the host\'s numbers: ' + JSON.stringify(jr));
     // trespassing in a camp in front of a guard: the friend's HUD meter fills
     const gid = await host.evaluate(() => {
       const g = __game, st = g.story, camp = st.places.C1, b = g.characters().find((c) => c.netRemote);

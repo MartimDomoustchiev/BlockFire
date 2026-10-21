@@ -5,7 +5,7 @@
  *   people      guards on posts and patrols, villagers in the
  *               squares, Old Wren at the hideout; NPCs far from every
  *               player sleep, fallen guards come back unseen
- *   campaign    five chapters (missions.js) run step by step, with
+ *   campaign    eighteen chapters (missions*.js) run step by step, with
  *               dialogue, objectives, markers, fail conditions and
  *               checkpoints ("desynchronized" -> retry)
  *   contracts   side jobs from the notice boards
@@ -18,7 +18,30 @@
  * for all players; sharedState() is what online clients receive.
  * ============================================================ */
 const STORY_SAVE_KEY = 'blockfire.story.v1';
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX'];
+// the campaign in order: the five of missions.js (core), the four of missions-extra.js and the nine of missions-more.js between them
+const STORY_CHAPTERS = [
+  STORY_CHAPTERS_CORE[0],                                   // I     The Quiet Order
+  STORY_CHAPTERS_CORE[1],                                   // II    The Ledger
+  STORY_CHAPTERS_CORE[2],                                   // III   The Smith of Ironwood
+  STORY_MORE_CHAPTERS.iron,                                 // IV    Iron for the Forge
+  STORY_NEW_CHAPTERS.tollRoads,                             // V     Toll Roads
+  STORY_MORE_CHAPTERS.informant,                            // VI    The Informant
+  STORY_NEW_CHAPTERS.granary,                               // VII   The Granary
+  STORY_MORE_CHAPTERS.prisoners,                            // VIII  The Prisoners
+  STORY_CHAPTERS_CORE[3],                                   // IX    The Captain
+  STORY_MORE_CHAPTERS.pickpocket,                           // X     The Pickpocket
+  STORY_MORE_CHAPTERS.answer,                               // XI    Vale's Answer
+  STORY_NEW_CHAPTERS.bells,                                 // XII   Bells of Ironwood
+  STORY_MORE_CHAPTERS.pages,                                // XIII  The Missing Pages
+  STORY_NEW_CHAPTERS.nightWatch,                            // XIV   Night Watch
+  STORY_MORE_CHAPTERS.marksmen,                             // XV    Marksmen of the Keep
+  STORY_MORE_CHAPTERS.rally,                                // XVI   Rally the Villages
+  STORY_MORE_CHAPTERS.seal,                                 // XVII  The Seal
+  STORY_CHAPTERS_CORE[4],                                   // XVIII The Magistrate
+];
+const STORY_CHAPTER_MAP_V1 = [0, 1, 2, 5, 8, 9];            // a version 1 save's chapter index (five chapters) -> a version 2 one (nine)
+const STORY_V2_PLACES = [0, 1, 2, 4, 6, 8, 11, 13, 17];     // where the nine chapters of a version 2 save sit in today's eighteen
 
 class Story {
   constructor(game, planInfo, opts = {}) {
@@ -50,6 +73,17 @@ class Story {
     this.wakeAt = this.upkeepAt = this.fogAt = this.runAt = 0;
     this.rng = new Rng(game.seed ^ 0x51a7);
     this.saveEnabled = opts.save !== false && !game.replica;
+    // challenges and collectibles (challenges.js): counters, named flags, what is done
+    this.stats = { kills: 0, silent: 0, arrows: 0, parries: 0, leaps: 0, contracts: 0, travels: 0, purchases: 0, distance: 0, posters: 0,
+      consumed: 0, smokeThrown: 0, upgrades: 0, maxedGear: 0, notorietyMax: 0, chapterClean: 0, chapterCleanHands: 0, chapterUnhurt: 0, nightChapters: 0, deaths: 0 };
+    this.flags = {};                     // granaryClean, bellsClean, tollsTaken
+    this.letters = new Set();            // Order letters read (indexes into ORDER_LETTERS)
+    this.challengesDone = new Set();
+    this.visited = new Set();            // site keys the players have set foot in
+    this.chap = { spotted: false, innocent: false, hurt: false, alarm: false };   // what happened in this chapter
+    this._lastXZ = new Map();
+    this.letterItems = [];
+    this.challengeAt = 0; this.letterAt = 0;
     this.hideSpots = [];
     for (const s of this.plan.sites) {
       for (const h of s.poi.hides || []) this.hideSpots.push(h);
@@ -63,6 +97,9 @@ class Story {
       ev.on('kill', (e) => this._onKill(e)),
       ev.on('guardAlert', (e) => this._onAlert(e)),
       ev.on('hayLanding', (e) => { if (e.character.isHuman) this.hayLandings.push({ at: game.time, x: e.x, y: e.y, z: e.z }); }),
+      ev.on('parry', (e) => { if (e.character && e.character.isHuman) this.stats.parries++; }),
+      ev.on('leap', (e) => { if (e.character && e.character.isHuman) this.stats.leaps++; }),
+      ev.on('used', (e) => { if (e.character && e.character.isHuman && (e.item === 'bandage' || e.item === 'medkit' || e.item === 'shield_potion')) this.stats.consumed++; }),
     ];
   }
 
@@ -74,6 +111,12 @@ class Story {
     out.V1 = take(P.hideout, vs); out.V2 = take(out.V1, vs); out.V3 = take(out.V2, vs); out.V4 = vs[0] || out.V1;
     out.C1 = take(out.V2, cs); out.C2 = take(out.V3, cs); out.C3 = cs[0] || out.C1;
     return out;
+  }
+
+  /** Is this character close enough to Ida's forge to have the gear upgraded? */
+  nearForge(ch) {
+    const k = this.shopkeeper;
+    return !!(this.shop && k && k.alive && ch && ch.alive && Math.hypot(k.pos.x - ch.pos.x, k.pos.z - ch.pos.z) < 7);
   }
 
   /** Where players come back to life: a mission checkpoint, else the hideout bed. */
@@ -90,6 +133,7 @@ class Story {
     if (ch.model) { ch.model.dispose(); ch.model = null; }
     ch.home = this.respawnPoint();
     if (saved && saved.length) { ch.inventory.slots = saved.map((s) => Story.migrateStack(s)); ch.inventory.touch(); }
+    Gear.attach(ch);                     // the loadout's slot rules; saved items go where they belong
     if (!ch.inventory.count('wrist_blade')) {
       ch.inventory.clear();
       ch.inventory.set(0, makeStack('wrist_blade'));
@@ -128,6 +172,7 @@ class Story {
       h.yaw = Math.atan2(-(m.x - h.pos.x), -(m.z - h.pos.z));
     });
     this.populate();
+    this._spawnLetters();
     if (this.shop) this._spawnShopkeeper();
     this._updatePosters();
     this.version++;
@@ -156,9 +201,11 @@ class Story {
     }
     const k = P.keep, kp = k.poi;
     kp.posts.forEach((post) => guard(k, { pos: post, marksman: post.marksman }));
-    for (const run of kp.walls) guard(k, { pos: run[0], route: run });
-    guard(k, { pos: kp.patrol[0], route: kp.patrol });
-    guard(k, { pos: kp.patrol[2], route: [kp.patrol[2], kp.patrol[3], kp.patrol[0], kp.patrol[1]] });
+    if (!this.flags.sealed) {              // the forged order of chapter XVII calls the wall and courtyard patrols away for good
+      for (const run of kp.walls) guard(k, { pos: run[0], route: run });
+      guard(k, { pos: kp.patrol[0], route: kp.patrol });
+      guard(k, { pos: kp.patrol[2], route: [kp.patrol[2], kp.patrol[3], kp.patrol[0], kp.patrol[1]] });
+    }
     // the Order: Old Wren waits at the hideout
     const m = P.hideout.poi.mentor, e = P.hideout.poi.entrance;
     this.mentor = Npc.ally(g, { name: 'Old Wren', look: 'mentor', pos: Object.assign({}, m, { yaw: Math.atan2(-(e.x - m.x), -(e.z - m.z)) }), tag: 'mentor', health: 500 });
@@ -229,6 +276,7 @@ class Story {
       let r = 1.0 * (1 - d / range) + 0.08;
       if (p.blending) r *= 0.12;
       if (p.sneaking) r *= 0.6;
+      if (p.isHuman) r *= Gear.stealthMult(p);
       if (p.sprinting || p.climbing) r *= 1.6;
       rate = Math.max(rate, r);
     }
@@ -243,7 +291,7 @@ class Story {
     for (const [id, n] of list) {
       if (ITEMS[id].kind === 'weapon' && ch.inventory.count(id)) continue;           // one thrower is enough
       const left = ch.inventory.add(this.stackOf(id, n));
-      if (left > 0) ItemDrop.pop(this.game, this.stackOf(id, left), ch.pos.x, ch.pos.y + 1, ch.pos.z);
+      if (left > 0) { const d = ItemDrop.pop(this.game, this.stackOf(id, left), ch.pos.x, ch.pos.y + 1, ch.pos.z); if (d) d.persistent = true; }
     }
   }
   giveAll(list) { for (const h of this.players()) this.giveTo(h, list); }
@@ -253,6 +301,14 @@ class Story {
   }
   cageOpen(site) { const [x, y, z] = site.poi.cage.door[0]; return this.game.world.getBlock(x, y, z) !== BLOCK.BARS; }
   unlockShop() { this.shop = true; this.version++; this._spawnShopkeeper(); }
+  /** The forged order (The Seal): the keep's patrols on the walls and in the courtyard march out and do not come back. */
+  recallKeepPatrols() {
+    this.flags.sealed = true;
+    const gone = (rec) => rec.kind === 'guard' && rec.site.kind === 'keep' && !!rec.o.route;
+    for (const rec of this.people) if (gone(rec)) { rec.ch.removed = true; }
+    this.people = this.people.filter((rec) => !gone(rec));
+    this.version++;
+  }
   finish() {
     this.finished = true;
     this.version++;
@@ -312,6 +368,7 @@ class Story {
   startChapter() {
     const def = this.nextChapter();
     if (!def || this.activity) return;
+    this.chap = { spotted: false, innocent: false, hurt: false, alarm: false };
     this._startActivity(def, 'chapter');
     this.game.events.emit('storyTitle', { title: 'CHAPTER ' + ROMAN[this.chapter] + ' - ' + def.title.toUpperCase(), sub: '' });
   }
@@ -360,6 +417,7 @@ class Story {
     const A = this.activity, M = A.M, g = this.game;
     A.failing = null;
     for (const r of M.ents.filter((x) => x.step >= from)) r.e.removed = true;
+    if (M.uses) M.uses = M.uses.filter((u) => u.step < from);
     M.ents = M.ents.filter((x) => x.step < from);
     for (const c of g.characters()) {
       if (c.npcRole !== 'guard' || !c.alive) continue;
@@ -387,11 +445,17 @@ class Story {
     for (const h of this.players()) h.home = this.respawnPoint();
     if (A.kind === 'chapter') {
       this.chapter++;
+      const night = Stealth.isNight(g);
+      if (!this.chap.spotted) this.stats.chapterClean++;
+      if (!this.chap.innocent) this.stats.chapterCleanHands++;
+      if (!this.chap.hurt) this.stats.chapterUnhurt++;
+      if (night) this.stats.nightChapters++;
       g.events.emit('storyTitle', { title: 'CHAPTER COMPLETE', sub: A.def.title });
       if (A.def.reward) A.def.reward(this, A.M);
       this.notoriety = 0;                                  // the Order lies low after every chapter
     } else {
       this.contractsDone++;
+      this.stats.contracts++;
       this.addSilver(A.def.reward);
       g.events.emit('storyTitle', { title: 'CONTRACT COMPLETE', sub: '+' + A.def.reward + ' silver' });
       if (A.board) this.offers.delete(A.board);
@@ -434,9 +498,13 @@ class Story {
   buy(ch, id) {
     const item = CONFIG.STORY.SHOP.find((s) => s.id === id);
     if (!item || !this.shop) return false;
+    const owned = item.give.find(([id]) => ITEMS[id] && ITEMS[id].kind === 'weapon' && ch.inventory.count(id));
+    if (owned) { this.game.events.emit('storyMessage', { text: 'You already carry a ' + ITEMS[owned[0]].name + '.', kind: 'warn', character: ch }); return false; }
+    if (item.give.some(([id, n]) => ch.inventory.spaceFor(this.stackOf(id, n)) < n)) { this.game.events.emit('storyMessage', { text: 'No room in your pack.', kind: 'warn', character: ch }); return false; }
     if (this.silver < item.price) { this.game.events.emit('storyMessage', { text: 'Not enough silver.', kind: 'warn', character: ch }); return false; }
     this.addSilver(-item.price);
     this.giveTo(ch, item.give);
+    this.stats.purchases++;
     this.game.events.emit('storyMessage', { text: 'Bought: ' + item.name, character: ch });
     this.save();
     return true;
@@ -448,6 +516,7 @@ class Story {
     if (!vp || !this.synced.has(vp.id) || !ch.alive) return false;
     if (this.anyCombat()) { this.game.events.emit('storyMessage', { text: 'You can\'t travel while you\'re being hunted.', kind: 'warn', character: ch }); return false; }
     ch.teleport(vp.base.x, vp.base.y + 0.01, vp.base.z);
+    this.stats.travels++;
     this.game.events.emit('travel', { character: ch, vp: vp.id });
     return true;
   }
@@ -459,6 +528,12 @@ class Story {
     if (a.a === 'accept') return this.acceptContract(ch, String(a.site), a.i | 0);
     if (a.a === 'abandon') { this.abandon(); return true; }
     if (a.a === 'buy') return this.buy(ch, String(a.id));
+    if (a.a === 'gear') {
+      const r = Gear.act(this, ch, String(a.g), a.i | 0, a.j | 0);
+      if (r.msg) this.game.events.emit('storyMessage', { text: r.msg, kind: r.ok ? undefined : 'warn', character: ch });
+      if (r.ok) this.save();
+      return r.ok;
+    }
     return false;
   }
 
@@ -471,6 +546,9 @@ class Story {
     if (step && step.talk) {
       const n = step.talk(this, A.M);
       if (n && n.alive && close(n.pos, 3.2)) return { kind: 'talk', text: 'Talk to ' + n.name, target: n };
+    }
+    if (A && !A.failing && A.M.uses) {
+      for (const u of A.M.uses) if (!u.done && u.step === A.stepI && close(u.at, 2.4)) return { kind: 'use', text: u.text, target: u };
     }
     if (!A && this.mentor && close(this.mentor.pos, 3.2)) {
       const next = this.nextChapter();
@@ -542,10 +620,11 @@ class Story {
       t.target.removed = true;
       this.posters = this.posters.filter((p) => p !== t.target);
       this.posterBack = g.time + 150;
+      this.stats.posters++;
       this.addNotoriety(-1);
       g.events.emit('storyMessage', { text: 'Poster torn down. Notoriety falls.', character: h });
     } else {
-      const time = t.kind === 'sync' ? 1.6 : 2.2;
+      const time = t.kind === 'sync' ? 1.6 : t.kind === 'use' ? (t.target.time || 2.2) : 2.2;
       this.actions.set(h.id, { kind: t.kind, target: t.target, from: h.pos.clone(), start: g.time, until: g.time + time, total: time });
       g.events.emit('storyAction', { character: h, kind: t.kind, total: time });
     }
@@ -561,6 +640,9 @@ class Story {
       g.events.emit('synced', { character: h, vp: vp.id });
       g.events.emit('storyTitle', { title: 'VIEWPOINT SYNCHRONIZED', sub: vp.name });
       this.save();
+    } else if (act.kind === 'use') {
+      const u = act.target;
+      if (!u.done) { u.done = true; u.run(this, u.M, h); }
     } else if (act.kind === 'cage') {
       this.setCageDoor(act.target, false);
       g.events.emit('cageOpened', { character: h, site: act.target.key });
@@ -602,6 +684,7 @@ class Story {
     if (!siteKey) return;
     const g = this.game;
     this.alarms.set(siteKey, g.time + CONFIG.STORY.AWARE.ALARM_TIME);
+    this.chap.alarm = true;
     for (const c of this.guardsOf(siteKey)) {
       if (c === by || c.controller.state === 'combat') continue;
       const a = g.rng.next() * Math.PI * 2, r = 2 + g.rng.next() * 6;
@@ -613,6 +696,7 @@ class Story {
   addNotoriety(n) {
     const before = this.notoriety;
     this.notoriety = Math.max(0, Math.min(3, this.notoriety + n));
+    this.stats.notorietyMax = Math.max(this.stats.notorietyMax, this.notoriety);
     if (this.notoriety !== before) {
       this.version++;
       this.game.events.emit('notoriety', { level: this.notoriety, delta: n });
@@ -653,6 +737,7 @@ class Story {
   _onShot(e) {
     const st = CONFIG.WEAPONS[e.cls];
     if (e.character) e.character.lastShotAt = this.game.time;
+    if (e.cls === 'smoke' && e.character && e.character.isHuman) this.stats.smokeThrown++;
     if (!st || st.silent || !e.character || e.character.npcRole === 'guard') return;
     Stealth.noise(this.game, e.origin, CONFIG.STORY.AWARE.NOISE_RANGE, e.character);
     for (const c of this.game.characters()) {
@@ -663,6 +748,7 @@ class Story {
   _onDamage(e) {
     const t = e.target, a = e.attacker;
     if (t && t.invulnerable) { t.health = Math.max(t.health, 1); return; }
+    if (t && t.isHuman && e.amount > 0) this.chap.hurt = true;
     if (!a || !a.isHuman || !t || !t.npc) return;
     Stealth.witness(this.game, a, t);
     if (t.npcRole === 'guard' && t.health > 0 && e.kind !== 'assassination') t.controller.callTo(this.game, t, a, a.pos.clone(), true);
@@ -670,7 +756,14 @@ class Story {
 
   _onKill(e) {
     const v = e.victim, k = e.killer;
+    if (k && k.isHuman) {
+      this.stats.kills++;
+      if (e.kind === 'assassination') this.stats.silent++;
+      if (e.cls === 'bow') this.stats.arrows++;
+    }
+    if (v && v.isHuman) { this.chap.hurt = true; this.stats.deaths++; }
     if (v.npcRole === 'villager' && !v.tag && k && k.isHuman) {
+      this.chap.innocent = true;
       this.addNotoriety(1);
       if (this.silver > 0) this.addSilver(-Math.min(this.silver, 20));
       this.game.events.emit('storyMessage', { text: 'An innocent fell. The Order does not kill the people it protects.', kind: 'warn' });
@@ -679,6 +772,7 @@ class Story {
 
   _onAlert(e) {
     if (!e.target || !e.target.isHuman) return;
+    this.chap.spotted = true;
     const site = e.character.site || 'road', g = this.game;
     if (g.time - (this.lastFight.get(site) || -999) > 25) { this.lastFight.set(site, g.time); this.addNotoriety(0.35); }
   }
@@ -689,6 +783,8 @@ class Story {
     if (g.time >= this.wakeAt) { this.wakeAt = g.time + 0.5; this._wake(); }
     if (g.time >= this.upkeepAt) { this.upkeepAt = g.time + 5; this._upkeep(); }
     if (g.time >= this.fogAt) { this.fogAt = g.time + 1; this._explore(); }
+    if (g.time >= this.challengeAt) { this.challengeAt = g.time + 1; this._checkChallenges(); }
+    if (g.time >= this.letterAt) { this.letterAt = g.time + 0.5; this._collectLetters(); }
     if (g.tickCount % 15 === 0) this._blending();
     this._interactions();
     this._dialogue();
@@ -722,6 +818,7 @@ class Story {
 
   /** Reveal the map around players as they explore. */
   _explore() {
+    this._track();
     for (const h of this.players()) {
       if (!h.alive) continue;
       const x = Math.round(h.pos.x), z = Math.round(h.pos.z);
@@ -788,7 +885,115 @@ class Story {
       v: this.version, ch: this.chapter, fin: this.finished ? 1 : 0, sil: this.silver, not: r2(this.notoriety), shop: this.shop ? 1 : 0,
       vps: Array.from(this.synced), fog: this.explored, act: this.activity ? this.activity.kind : 0,
       obj: o ? { t: o.title, x: o.text, h: o.hint, f: o.failing ? 1 : 0, m: mk, tm: o.timer !== null && o.timer !== undefined ? r2(o.timer) : null } : null,
+      // the journal (J) and the gear screen read these on a client too
+      jr: { s: this._statsOut(), f: this.flags, l: Array.from(this.letters), c: Array.from(this.challengesDone), vi: Array.from(this.visited) },
     };
+  }
+
+  _statsOut() {
+    const o = {};
+    for (const k of Object.keys(this.stats)) o[k] = Math.round(this.stats[k]);
+    return o;
+  }
+
+  // ================================================================== uses, letters, challenges
+  /** A thing to press E on for `u.time` seconds (see missions-extra.js). Cleared with its step on retry. */
+  addUse(M, u) {
+    u.M = M; u.step = M.stepI; u.done = false;
+    (M.uses || (M.uses = [])).push(u);
+    return u;
+  }
+
+  /** Where the nearest unfinished use of this mission is (for the objective marker), or null. */
+  nearestUse(M) {
+    const left = (M.uses || []).filter((u) => !u.done && u.step === M.stepI);
+    if (!left.length) return null;
+    const p = this.nearestPlayer(left[0].at);
+    const from = p ? p.ch.pos : left[0].at;
+    left.sort((a, b) => Math.hypot(a.at.x - from.x, a.at.z - from.z) - Math.hypot(b.at.x - from.x, b.at.z - from.z));
+    return left[0].at;
+  }
+
+  /** How many of an item all the players carry together (quest items are shared). */
+  totalCount(id) { return this.players().reduce((n, h) => n + h.inventory.count(id), 0); }
+
+  /** Was there an alarm anywhere during this chapter (for the 'unseen' flags)? */
+  chapterAlarmed() { return !!this.chap.alarm; }
+
+  /** A bell rings: the village wakes (villagers near the tower run) and the mission notes it. */
+  ringBell(M, key) {
+    const site = this.places[key], g = this.game, t = site.poi.tower.top, top = new THREE.Vector3(t.x, t.y, t.z);    // scare() keeps what it is given: a Vector3
+    M.rung = M.rung || new Set();
+    M.rung.add(key);
+    for (const c of g.characters()) {
+      if (c.npcRole === 'villager' && c.alive && c.controller && c.controller.scare && c.pos.distanceTo(top) < 40) c.controller.scare(g, c, top);
+    }
+    g.events.emit('storyMessage', { text: 'The bell in ' + site.name + ' rings out across the island.' });
+    this.version++;
+  }
+
+  /** The twelve Order letters that are still lying about: each is a pickup that is read on collection. */
+  _spawnLetters() {
+    this.letterItems = [];
+    ORDER_LETTERS.forEach((L, i) => {
+      if (this.letters.has(i)) return;
+      const p = letterSpot(this, L.at);
+      if (!p) return;
+      const d = new ItemDrop({ id: 'order_letter', count: 1, data: { letter: i } }, p.x, p.y + 0.3, p.z);
+      d.persistent = true; d.pickupDelay = 0;
+      this.game.addEntity(d);
+      this.letterItems.push(d);
+    });
+  }
+
+  /** Letters picked up are read at once: the letter is taken from the pack and counted. */
+  _collectLetters() {
+    for (const h of this.players()) {
+      const inv = h.inventory;
+      for (let i = 0; i < inv.size; i++) {
+        const s = inv.get(i);
+        if (!s || s.id !== 'order_letter') continue;
+        inv.set(i, null);
+        const n = s.data ? s.data.letter : -1;
+        if (n < 0 || this.letters.has(n)) continue;
+        this.letters.add(n);
+        this.stats.letters = this.letters.size;
+        this.version++;
+        this.game.events.emit('storyMessage', { text: '(' + this.letters.size + '/' + ORDER_LETTERS.length + ') ' + ORDER_LETTERS[n].text, character: h });
+        this.save();
+      }
+    }
+  }
+
+  /** Distance walked and sites visited, sampled once a second (teleports are not distance). */
+  _track() {
+    for (const h of this.players()) {
+      if (!h.alive) { this._lastXZ.delete(h.id); continue; }
+      const prev = this._lastXZ.get(h.id);
+      if (prev) { const d = Math.hypot(h.pos.x - prev.x, h.pos.z - prev.z); if (d < 20) this.stats.distance += d; }
+      this._lastXZ.set(h.id, { x: h.pos.x, z: h.pos.z });
+      for (const s of this.plan.sites) if (!this.visited.has(s.key) && Math.hypot(s.x - h.pos.x, s.z - h.pos.z) < 28) { this.visited.add(s.key); this.version++; }
+    }
+  }
+
+  /** Every challenge that is now met is completed: its silver and gear go to the players. */
+  _checkChallenges() {
+    for (const def of STORY_CHALLENGES) {
+      if (this.challengesDone.has(def.id)) continue;
+      let ok = false;
+      try { ok = !!def.check(this); } catch (e) { ok = false; }
+      if (ok) this._completeChallenge(def);
+    }
+  }
+
+  _completeChallenge(def) {
+    this.challengesDone.add(def.id);
+    const r = def.reward, bits = [];
+    if (r.silver) { this.addSilver(r.silver); bits.push('+' + r.silver + ' silver'); }
+    if (r.gear) { this.giveAll(r.gear.map((id) => [id, 1])); bits.push(r.gear.map((id) => CONFIG.STORY.GEAR.PIECES[id].name).join(', ')); }
+    this.game.events.emit('storyTitle', { title: 'CHALLENGE: ' + def.title.toUpperCase(), sub: def.text + (bits.length ? '  ' + bits.join('  ') : '') });
+    this.version++;
+    this.save();
   }
 
   // ================================================================== saving
@@ -796,15 +1001,22 @@ class Story {
     if (!this.saveEnabled) return;
     const p = this.game.player;
     const data = {
-      v: 1, seed: this.game.seed, chapter: this.chapter, finished: this.finished, shop: this.shop, silver: this.silver,
+      v: 3, seed: this.game.seed, chapter: this.chapter, finished: this.finished, shop: this.shop, silver: this.silver,
       synced: Array.from(this.synced), explored: this.explored, contracts: this.contractsDone,
       inv: p ? p.inventory.serialize() : null,
+      stats: this.stats, flags: this.flags, letters: Array.from(this.letters), crates: Array.from(this.crates || []).map(([k, t]) => [k, t - this.game.time]), challenges: Array.from(this.challengesDone), visited: Array.from(this.visited),
     };
     try { localStorage.setItem(STORY_SAVE_KEY, JSON.stringify(data)); } catch (e) { /* storage full / blocked */ }
   }
 
   _restore(d) {
-    this.chapter = Math.max(0, Math.min(STORY_CHAPTERS.length, d.chapter | 0));
+    this.chapter = Story.chapterOfSave(d);
+    if (d.stats) for (const k of Object.keys(this.stats)) if (typeof d.stats[k] === 'number') this.stats[k] = d.stats[k];
+    if (d.flags) this.flags = Object.assign({}, d.flags);
+    this.letters = new Set((d.letters || []).filter((i) => i >= 0 && i < ORDER_LETTERS.length));
+    this.challengesDone = new Set((d.challenges || []).filter((id) => STORY_CHALLENGES.some((c) => c.id === id)));
+    this.visited = new Set(d.visited || []);
+    if (Array.isArray(d.crates)) this.crates = new Map(d.crates.filter((c) => Array.isArray(c) && typeof c[1] === 'number').map(([k, dt]) => [String(k), this.game.time + dt]));
     this.finished = !!d.finished;
     this.shop = !!d.shop;
     this.silver = d.silver | 0;
@@ -813,10 +1025,24 @@ class Story {
     this.explored = Array.isArray(d.explored) ? d.explored.slice(0, 2000) : [];
   }
 
+  /**
+   * The next chapter of a saved story, in today's list of eighteen. A version 1 save counted five chapters, a version 2 save nine:
+   * its next chapter becomes the first one after the last it had played, so the new chapters in between are not skipped.
+   */
+  static chapterOfSave(d) {
+    let n = d.chapter | 0;
+    if (d.v === 1) n = STORY_CHAPTER_MAP_V1[Math.max(0, Math.min(STORY_CHAPTER_MAP_V1.length - 1, n))];
+    if (d.v === 1 || d.v === 2) {
+      n = Math.max(0, Math.min(STORY_V2_PLACES.length, n));
+      return n <= 0 ? 0 : n >= STORY_V2_PLACES.length ? STORY_CHAPTERS.length : STORY_V2_PLACES[n - 1] + 1;
+    }
+    return Math.max(0, Math.min(STORY_CHAPTERS.length, n));
+  }
+
   static loadSave(seed) {
     try {
       const d = JSON.parse(localStorage.getItem(STORY_SAVE_KEY) || 'null');
-      return d && d.v === 1 && d.seed === seed ? d : null;
+      return d && (d.v === 1 || d.v === 2 || d.v === 3) && d.seed === seed ? d : null;
     } catch (e) { return null; }
   }
 

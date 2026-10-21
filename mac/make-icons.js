@@ -3,6 +3,7 @@
  *   mac/AppIcon.icns                    the Mac app icon (via sips + iconutil)
  *   icons/icon-192.png, icon-512.png    for the installable web app / favicon
  *   icons/icon-maskable-512.png         same, with safe padding for round masks
+ *   native/resources/icon.png           1024px, full bleed, for the Android and iPhone apps (npx @capacitor/assets generate)
  * Dev tool: needs the test harness's Playwright (node mac/make-icons.js).
  */
 const fs = require('fs');
@@ -95,6 +96,8 @@ function drawIcon({ size, maskable }) {
   await write(path.join(ROOT, 'icons', 'icon-512.png'), 512, false);
   await write(path.join(ROOT, 'icons', 'icon-192.png'), 192, false);
   await write(path.join(ROOT, 'icons', 'icon-maskable-512.png'), 512, true);
+  // phones round or square the corners themselves: the source is the full-bleed square
+  await write(path.join(ROOT, 'native', 'resources', 'icon.png'), 1024, true);
   await browser.close();
 
   // the Mac icon set: every size macOS wants, then one .icns

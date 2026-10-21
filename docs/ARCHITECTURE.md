@@ -267,14 +267,15 @@ A stealth campaign on its own island (`CONFIG.STORY.SEED`). Mode `story` in `GAM
     and rounds for the gear the player carries, then that crate is empty for that player for `STORY.ARMORY.RESTOCK`
     seconds (`HOME_RESTOCK` at the hideout; `crateWait`). Running dry (`dryFire`) tells the player where to go; the
     HUD's supply marker points at the nearest stocked crate when arrows or smoke run low.
-  - The activity runner runs chapters and contracts from `missions.js`.
+  - The activity runner runs chapters and contracts from `missions.js`, `missions-extra.js` and `missions-more.js`.
   - Each step can have setup, check, fail, checkpoint, talk, cage, timer and retry. A failure is a "desync":
     the step's entities are cleared, guards are calmed, players go back to the checkpoint and the step's setup re-runs.
 - **HUD** (`js/ui/story-hud.js`, `story-screens.js`): objective, markers, awareness meters, takedown reticle,
   prompts, subtitles, barks, title cards, the map with fast travel, the notice board and the shop. These read a
-  small interface that both `Story` and the client's `StoryMirror` implement.
+  small interface that both `Story` and the client's `StoryMirror` implement (the mirror also carries what the
+  journal and the gear screen read: `stats`, `flags`, `letters`, `challengesDone`, `visited`, `nearForge(ch)`).
 - **Online:**
-  - Snapshots carry `sty` (`Story.sharedState()`) when its version changes.
+  - Snapshots carry `sty` (`Story.sharedState()`) when its version changes, including the journal block `jr`.
   - Per player, they carry the prompt and the timed action (`me.sp` / `me.ac`).
   - Guard records carry their awareness of that player (`aw` / `hm`).
   - Story events are forwarded, and screen choices go back as `{op:'story'}` UI messages.
@@ -326,3 +327,190 @@ A stealth campaign on its own island (`CONFIG.STORY.SEED`). Mode `story` in `GAM
   whose string and nocked arrow follow `ch.draw`, shared by the character models and the first-person view. The
   viewmodel turns the sword at the wrist through three cut poses and a block pose (`ViewModel.SWORD`).
 - **Tests:** `story.test.js` ("story arms crates", "story bow", "story sword", "story looks").
+
+## 14. Start screen, looks and characters (the lobby pass)
+
+- **Lobby** (`index.html` `#overlay`, `js/ui/menu.js`, `js/ui/lobby-stage.js`): the first screen. Three areas: YOUR
+  CHARACTER (name and look), the stage in the middle, and the side panel (PLAY mode cards, SETTINGS, CONTROLS, ONLINE).
+  The stage is its own `THREE.Scene`, drawn with the game's renderer while no game runs (`main.js` frame, `!game`). The
+  camera frames the figure into the free area (`#stageSlot`), so the panels never cover it. The pause menu is the same
+  overlay with `#overlay.paused`.
+- **Looks** (`js/render/looks.js`): palettes (skin, hair style and colour, tops, trousers, accents, facial hair) and
+  `PLAYER_LOOK.normalize`, which turns any input into a valid spec `{ skin, style, hair, top, bottom, accent, facial,
+  hood, cloak }`. Settings keep it (`settings.look`). A `Character` carries it as `lookSpec` with `look: 'player'`
+  (or `'order'` in story, where the uniform stays and the colours follow the player). Bots keep the arena ranger and the
+  story NPC looks.
+- **Online:** the joiner's look goes in `hello.look`; every character record carries `ls` (the packed spec, see
+  `NetProto.look`). `NET.VERSION` is 7 (journal state in `sty`, eighteen chapters, four new quest items).
+- **Models** (`js/render/models.js`): faces (eyes with whites, brows, nose, lips, cheeks, jaw, ears), hair in seven
+  styles (`BodyGeometry.hairParts`), jackets with lapels and buttons, pleated cloaks, collars, belts and pockets, boots
+  with cuffs and soles, and a vertical shading gradient on each segment (`BodyKit.grad`, applied in `BodyKit.merge`).
+  Materials are Phong (a little sheen) and still share geometry between look-alikes.
+- **Stage props:** the character holds the Order's longsword; the lobby camera turns with a drag or the wheel
+  (`LobbyStage.nudge`).
+
+## 15. Story gear: the Order's loadout, outfit and forge
+
+Story mode uses no block inventory. Rules: `js/story/gear.js`. Screen: `js/ui/gear-screen.js` (Tab in story, a
+`StoryScreens` kind).
+
+- **Loadout** = inventory slots 0-4 (`Gear.LOADOUT`): hidden blade, sword, ranged, throwable, remedy. The inventory's
+  optional rule `Inventory.slotFits(i, stack)` (set by `Gear.attach`) lets a loadout slot take only its kinds
+  (`CONFIG.STORY.GEAR.LOADOUT[i].ids`). The hotbar shows the five labelled slots (`HotbarHud.setLoadout`).
+- **Outfit** = gear pieces (`kind: 'gear'`, `CONFIG.STORY.GEAR.PIECES`): a stack with `data = { lvl, eq }`. Wearing a
+  piece sets `eq`; a second piece for the same place takes the first off. Pieces have a slot, a rarity and base stats.
+- **Stats** are summed from what is worn (`Gear.stats`, cached on the inventory version): attack (blade damage),
+  defense (damage taken, `Combat.applyDamage`) and stealth (how slowly guards notice you, `NpcController.perceive` and
+  `Story.suspicionRate`). Falls ignore defense.
+- **Forge and selling:** `Gear.act(story, ch, op, i, j)` with ops `equip`, `move`, `sell`, `upgrade`. Upgrades need Ida
+  in reach (`Story.nearForge`), the shop open, silver and materials (`CONFIG.STORY.GEAR.UPGRADE`).
+- **Online:** the screen sends `{ op: 'story', a: 'gear', g: op, i, j }` (the sub-operation is `g`, because `op` is the
+  transport's field); the host runs it through `Story.act`.
+
+## 16. The campaign: chapters, uses, letters, challenges and the journal
+
+- **Chapters:** `STORY_CHAPTERS` (`story.js`) composes eighteen: the five of `missions.js` (`STORY_CHAPTERS_CORE`), the four
+  of `missions-extra.js` (Toll Roads, The Granary, Bells of Ironwood, Night Watch) and the nine of `missions-more.js`
+  (`STORY_MORE_CHAPTERS`: Iron for the Forge, The Informant, The Prisoners, The Pickpocket, Vale's Answer, The Missing
+  Pages, Marksmen of the Keep, Rally the Villages, The Seal). Order: I Quiet Order, II Ledger, III Smith, IV Iron, V Toll
+  Roads, VI Informant, VII Granary, VIII Prisoners, IX Captain, X Pickpocket, XI Vale's Answer, XII Bells, XIII Pages,
+  XIV Night Watch, XV Marksmen, XVI Rally, XVII Seal, XVIII Magistrate. `StoryKit` (same file) holds the shared step
+  builders and point finders (`clear`, `report`, `roadPoint`, `wallSpots`, `houseOf`, `elder`).
+  - **Saves are version 3.** `Story.chapterOfSave(d)` migrates older ones: version 1 (five chapters) goes through
+    `STORY_CHAPTER_MAP_V1` to a version 2 index (nine chapters); a version 2 save's next chapter becomes the first
+    chapter after the last one it had played (`STORY_V2_PLACES`), so the new chapters in between are played, not skipped.
+  - **Chapter links:** Pell's key (X) makes the lockbox of XVII quick (1.6 s instead of 6 s); the forged order of XVII
+    (`Story.recallKeepPatrols`, flag `sealed`) removes the keep's wall and courtyard patrols for good, and `populate`
+    skips them on later loads.
+  - **Moving targets and conditions:** a use target may have getters (`at` follows an NPC, `text` and `time` depend on
+    what the player carries). Uses are checked before the shop, so a use at Ida's forge wins over "Trade with Ida".
+- **Uses:** a step adds things to press E on with `S.addUse(M, { at, text, time, run(S, M, ch) })`. The director
+  counts them as a timed action (like sync and cage), runs `run` when the action finishes, and drops them when their
+  step is retried. The objective marker points at the nearest one (`S.nearestUse`).
+- **Contracts:** six kinds (assassinate, steal, rescue, courier, bounty, collect). `Contracts.make` hands the last two
+  to `STORY_NEW_CONTRACTS`.
+- **Order letters:** twelve collectibles (`ORDER_LETTERS` in `challenges.js`) lie at points of interest. Each is a
+  persistent `ItemDrop` that is read when picked up (`Story._collectLetters` takes it out of the pack and counts it).
+- **Challenges** (`STORY_CHALLENGES`, 37): goals over `S.stats` (counters kept by event hooks: kills, silent takedowns,
+  arrows, parries, leaps, travel, distance, sites visited, purchases, forge upgrades, chapters done unseen, and so
+  on) and `S.flags` (granary, bells, tolls, informant, Pell's key, columns, marksmen, the seal). `Story._checkChallenges` runs once a second; a completion pays silver and
+  some pay challenge-only gear (`CONFIG.STORY.GEAR.PIECES`, price 0).
+- **Journal** (J in story): chapters, challenges with their rewards, and the letters read so far (`journalHTML`).
+- **Length:** measured by `tests/campaign.test.js`, which plays all eighteen chapters with a scripted player and adds up the
+  straight-line distance between its objectives (about 8,100 blocks, x1.35 for real paths, at 5.2 blocks per second) and the
+  time it spends waiting for NPCs (about 5 minutes): **about 40 minutes for the main road at a run**, with no fighting,
+  no retries and no looking around. The test prints the table (per chapter: blocks, waiting seconds, minutes). A first
+  playthrough with stealth, fights and the odd retry takes a few times that; the 37 challenges, 12 letters, contracts and
+  gear upgrades come on top. It is not a day.
+
+## 17. Touch controls (phones and tablets)
+
+`js/input/touch.js` (`TouchUI`) is an overlay that drives the same `Input` object as the keyboard: the stick sets
+`input.move` (an analogue move used by `KeyboardMouseController`), drags on the open screen call `touchLook`, and
+buttons press keys or mouse buttons (`touchKey`, `touchButton`) or dispatch the key event the UI already listens for
+(Tab, M, J). `Input.touch` makes lock and unlock plain flags, so there is no pointer lock to wait for.
+
+- **Shown** while playing with nothing else open, when the pointer is coarse (`TouchUI.wanted`) or with `?touch=1`.
+  Layout by mode, top left: GEAR, MAP and JOURNAL in story; FLY in explore and free build; BUILD in free build; INV
+  elsewhere. FIRE, AIM, JUMP, RELOAD, USE, CROUCH and NEXT on the right; MENU at the top right, beside the minimap. `body.touch` moves the HUD (vitals, ammo, material counts) out of the way.
+- **Platforms:** Android Chrome goes full screen and locks landscape (`AppShell.toggleFullscreen`). iPhone Safari has
+  no full screen API, so the page says to use Add to Home Screen (standalone mode). Portrait shows a turn-your-phone
+  message. The first touch unlocks audio. The viewport disables pinch zoom.
+- **Tests:** `tests/touch.test.js` sends real touch events through the DevTools protocol (`Input.dispatchTouchEvent`).
+
+## 18. Performance
+
+Measured headless (Chromium with software WebGL, so absolute numbers are not a phone or a GPU): the JavaScript per
+tick is 0.1-0.2 ms and the rest of a frame is the GPU. Frame time follows render distance (about 25, 37 and 45 ms at
+4, 6 and 8 chunks) and triangles, not screen size.
+
+- **Graphics presets** (Settings > Graphics, `CONFIG.QUALITY`): Low (4 chunks, 0.75 pixel ratio, story people drawn to
+  60 blocks), Medium (6, 1.0, 75), High (8, 1.5, 90) and Ultra (12 chunks, section 21). The default is *Auto*
+  (`GpuTier.pick` in `render/post.js`, from the card's name in `WEBGL_debug_renderer_info`): Ultra for a desktop-class
+  card (Radeon RX, GeForce RTX / GTX 1060 and up, Arc), Medium on touch screens, High otherwise (built-in graphics,
+  Apple, software rendering). Settings saved before Auto existed move to Auto once (`qualityV`). `?quality=` overrides.
+- **Auto resolution** (`main.js` `adaptResolution`): when frames run long for a while the pixel ratio drops (to 0.6 of
+  the preset), and it rises again when they are short. `CONFIG.AUTO_RESOLUTION` has the thresholds; a preset can
+  override them (`autoRes`: Ultra keeps above ~57 fps and may go up to 1.34x on a fast, high refresh screen).
+- Dynamic render distance (Auto distance) already lowers the distance while the frame rate is low.
+
+## 20. The story land: desert, smooth ground and sun shadows (NET.VERSION 8)
+
+Story mode no longer draws the island as cubes. The other modes are unchanged (classic cubes, classic materials).
+
+- **Terrain** (`worker/terrain.js`, story only): sand dunes, green irrigated fields along the water (`storyTop`), bare
+  limestone on steep slopes and high ground. Palms grow in the green and on the dunes (`storyTreeKind`), reeds on the
+  dry shore. The sea floor and shores are sand; there is no snow, no cactus and no leaf cube in the story land.
+- **Smooth ground** (`worker/mesher.js`, `SMOOTH`): the natural ground (grass, dirt, sand, stone, path) is one
+  continuous skin per chunk with a height at each corner, averaged over the neighbouring columns that are at most one
+  block apart (`LINK_DY`); a cliff keeps its cubes. Vertex colours come from the column's material and are jittered per
+  column with a hash of the world position, so chunks agree on their borders. The skin is drawn by `World._makeGround` as the chunk's `meshGround` mesh, and casts shadows like the cubes.
+  Collision is still the voxels, so walking and climbing do not change.
+- **Built things stay cubes**: walls, roofs (flat, with parapets), floors, trunks of the keep and the camps. Every chunk
+  waits for all 8 neighbours before it is meshed (story only), because the skin reads the diagonal columns too.
+- **Palms and reeds** (`emitPalm`, `emitReeds`, `propsOf`): real geometry, built in the mesher from the palm marker
+  block (`BLOCK.PALM`, solid, no tile) and the bush blocks on the shore. Fronds sway in the prop shader (`sway`).
+- **Look pass 2** (NET.VERSION 9): the atlas tiles are 128 px; the ground skin has baked contact shade (a corner lower
+  than the ground around it takes less light, `emitGround` in the mesher); its shader bends the normal with the slope of
+  two noise scales and wind ripples, and shades wet sand by the water and sun-dried grass towards olive; shadows are 12
+  rotated taps over a disc a few texels wide (soft edges); the tone curve is ACES-like with a warm-highlight, cool-shadow
+  grade; the sky has a warm horizon band towards the sun and slow cirrus streaks; the
+  High preset's shadow map is 4096. Village houses are brick or plaster, not planks.
+- **Materials** (`render/story-materials.js`, `render/story-textures.js`): a 128-pixel tile atlas with mip-maps, painted
+  from tileable value noise (sandstone ashlar, mudbrick with limewash, acacia beams, palm planks, terracotta, linen,
+  straw, papyrus), and four shaders: voxels, ground skin, props and water (ripples, a sun glint, Fresnel sky).
+  The shared uniforms (`uSunDir`, `uSunColor`, `uSkyAmb`, `uGndAmb`) are set by `Sky._updateStory` from the clock:
+  the sun at day, the moon and a cooler ambient at night.
+- **Sky** (`render/sky.js`): a dome with a gradient, a round sun with a glow, a moon and stars at night. Set on `Sky`
+  only when the story materials are in use; the cube modes keep their sky.
+- **Sun shadows** (`render/shadow.js`): one depth map from the sun, centred ahead of the viewer. Only layer 1 (chunks,
+  props, people) casts. It is redrawn when the view has moved 3 blocks, the sun has turned, or after 15 frames; the
+  shaders take four taps of it. The size comes from the quality preset (`CONFIG.QUALITY.*.shadow`: 0 on Low, 1024 on
+  Medium, 2048 on High).
+- **People** (`render/models.js`): the island's dress is linen, ochre and indigo; the guards wear kilts and bare
+  chests with a bronze collar (`usekh`), the captain and the Magistrate a striped nemes (`nemes`) and a feather.
+  These are original garments inspired by the period and place, not any game's models.
+
+**Measured** (headless Chromium, software WebGL, one page, the story at the start, 1000x600):
+classic sandbox 54 fps; story Low 31, Medium 23, High 19 (shadows are about a third of it; props and the voxel shader
+the rest). Two pages in one browser (the co-op test) slow the friend's page to a few frames a second, so the co-op test
+waits for the friend's game to start ticking before it presses E. Real GPUs and phones were not measured here.
+
+## 21. Ultra: desktop graphics cards (post-processing)
+
+Ultra is for desktop graphics cards (the user's is a Radeon RX 9060 XT). Everything below is off on Low, Medium and High,
+except the anisotropic filtering and the aerial haze, which are cheap.
+
+- **Post-processing** (`render/post.js`, `PostFX`): the views draw into one off-screen target (`PlayerView.render(...,
+  post)` binds its rectangle there) with 4x MSAA, at max(screen pixel ratio, 1.5) times the CSS size and the auto
+  resolution scale, capped at twice 4K. Then: bloom (luminance threshold 0.86, dual Kawase blur down to 1/32 and back
+  up), sun rays (story: each pixel marches 48 steps towards the sun on screen and gathers the open sky near it; the sky
+  dome writes alpha 0, clouds a little more, everything else 1, so whatever stands in front of the sun shadows the
+  rays; one pass per view, so split screen has two suns), and the final pass: a 4-tap filter down to the canvas, a
+  contrast-adaptive sharpen (clamped to the neighbours' range), bloom and rays added, a film grade (gentle S-curve,
+  golden highlights, teal shadows, half strength outside story), a vignette and a dither against banding.
+  The canvas itself stays at the screen's resolution; the lobby stage is not post-processed.
+- **Textures**: the story voxel shader samples with `textureGrad` instead of a hand-picked `textureLod`, with the
+  footprint scaled so the mip level stays at 2.5 or finer (no bleeding between atlas tiles) while the atlas's
+  anisotropic filtering (`aniso`: 1 / 2 / 4 / 16 by preset, `uAniso`) keeps faces at grazing angles sharp.
+- **Haze** (all story presets): the fog colour turns towards the sun's colour when you look towards it, and a thin
+  aerial haze (`1 - exp(-0.0045 d)`, at most 30%) starts long before the fog proper.
+- **Shadows**: an 8192 map reaching 80 blocks (`shadowExtent`) instead of 4096 over 46: twice the reach, the same
+  sharpness. Clamped to the card's largest texture.
+- **Clouds** (`Sky.clouds`, `uClouds`): cumulus on the story dome, five octaves of noise lit from the sun's side.
+- **Windows launcher**: Edge or Chrome is started with `--force_high_performance_gpu --ignore-gpu-blocklist` (only
+  when the browser was not already running).
+
+**Measured** on an Apple M1 laptop (headless Chromium on Metal, vsync off, story on the hills, auto resolution off):
+High at 1920x1080 214 fps; Ultra (12 chunks) at 1920x1080 61 fps, at 2560x1440 36 fps. A desktop RX 9060 XT is several
+times an M1's GPU; it was not measured. Software WebGL (the tests) picks High on Auto.
+
+## 19. Engine boundaries (what a reusable engine would take)
+
+Not extracted yet. Generic parts (no BLOCKFIRE rules in them): `core/` (fixed-step `Game`, events, rng), `world/`
+(chunk streaming, edits, raycast), `worker/` (noise, mesher, the worker bundle), `render/` (atlas, sky, materials,
+character shapes), `input/` (controllers and touch), `items/inventory.js`, `entities/` (AABB physics), `net/`
+(transport, protocol, host and client). BLOCKFIRE content: `constants.js` values, `match/`, `ai/`, `combat/` rules,
+`story/` (director, missions, NPCs, stealth, gear, challenges), `ui/` screens and HUD, the modes table in `core/game.js`,
+and `main.js` (the boot that wires them). Extracting an engine means moving the generic parts behind one boot API and
+leaving the content as a game on top. See the README for the open question.

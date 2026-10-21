@@ -15,7 +15,7 @@
  * Places (V1..V4, C1..C3, keep, hideout) are chosen from the map:
  * V1 is the village nearest the hideout, and so on.
  * ============================================================ */
-const STORY_CHAPTERS = [
+const STORY_CHAPTERS_CORE = [
   // ------------------------------------------------------------------ I
   {
     key: 'ch1', title: 'The Quiet Order',
@@ -118,7 +118,7 @@ const STORY_CHAPTERS = [
         },
         done: (S, M) => { M.fitch.suspicion = 0; },
         retry: 1,
-        checkpoint: (S) => S.places.V2.poi.well,
+        checkpoint: (S) => S.places.V2.poi.spots[0],
       },
       {
         text: 'Steal the ledger from the strongbox in {C1}', hint: 'The ledger lies in the big tent. Walk over it to take it.',
@@ -129,7 +129,7 @@ const STORY_CHAPTERS = [
         },
         marker: (S, M) => S.places.C1.poi.strongbox,
         check: (S) => S.anyHas('ledger'),
-        checkpoint: (S) => S.places.V2.poi.well,
+        checkpoint: (S) => S.places.V2.poi.spots[0],
       },
       {
         text: 'Get clear of {C1}', hint: 'Get 50 blocks away with nobody chasing you.',
@@ -227,13 +227,14 @@ const STORY_CHAPTERS = [
       {
         text: 'Lose your pursuers', hint: 'Break line of sight and hide until nobody is hunting you.',
         lines: [['Old Wren', 'Brask is down. Now get out of there.']],
+        marker: (S) => S.plan.hideout.poi.entrance,
         check: (S, M) => { M.clear = S.anyCombat() ? 0 : (M.clear || 0) + 0.1; return M.clear > 5; },
       },
       { text: 'Return to Old Wren', marker: (S) => S.mentor, talk: (S) => S.mentor, check: (S, M) => M.talked === S.mentor },
     ],
     outro: [
       ['Old Wren', 'Brask is dead. Vale will be frightened now, and frightened men make mistakes.'],
-      ['Old Wren', 'He has ordered the villages burned at dawn. Tonight, we end this.'],
+      ['Old Wren', 'Quartermaster Pell carries the keys to every lockbox Vale owns. A man who carries keys can be relieved of them.'],
     ],
     reward: (S) => { S.addSilver(120); S.giveAll([['arrow', 12], ['smoke_bomb', 2]]); },
   },
@@ -251,6 +252,7 @@ const STORY_CHAPTERS = [
         setup: (S, M) => {
           const t = S.places.keep.poi.throne;
           M.vale = S.keep(M, Npc.guard(S.game, S.places.keep.key, { pos: Object.assign({}, t, { yaw: S.places.keep.poi.posts[3] ? S.places.keep.poi.posts[3].yaw : 0 }), name: 'Magistrate Corvin Vale', look: 'magistrate', health: 160, tag: 'target' }));
+          if (S.flags.sealed) S.lines([['Old Wren', 'The forged order has called the wall patrols away. You will find the courtyard emptier than it was.']]);
         },
         check: (S) => S.players().some((p) => p.alive && Stealth.restricted(S.game, p.pos.x, p.pos.z) && Math.hypot(p.pos.x - S.places.keep.x, p.pos.z - S.places.keep.z) < 24),
       },
@@ -281,7 +283,7 @@ const STORY_CHAPTERS = [
  * map. Same step format as the chapters.
  * ============================================================ */
 const Contracts = {
-  KINDS: ['assassinate', 'steal', 'rescue', 'courier'],
+  KINDS: ['assassinate', 'steal', 'rescue', 'courier', 'bounty', 'collect'],
   TARGETS: ['Sergeant Kell', 'Toll-Master Orrin', 'Sergeant Vasko', 'Quartermaster Pell', 'Sergeant Dunmore', 'Bailiff Crane'],
 
   /** Three offers for the board at `site`. */
@@ -350,6 +352,7 @@ const Contracts = {
         ],
       };
     }
+    if (STORY_NEW_CONTRACTS[kind]) return STORY_NEW_CONTRACTS[kind](S, board, rng);     // missions-extra.js
     // courier: a sealed letter to someone in another village, against the clock
     const to = pick(P.villages.filter((v) => v !== board)), name = pick(Npc.FIRST), door = pick(to.poi.doors);
     const dist = Math.hypot(to.x - home.x, to.z - home.z), limit = Math.round(40 + dist / 3.2);

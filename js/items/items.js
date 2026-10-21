@@ -64,6 +64,21 @@ for (const id of Object.keys(CONFIG.STORY.BLADES)) {
 defItem('ledger', { kind: 'quest', name: "Tax Collector's Ledger", maxStack: 1 });
 defItem('letter', { kind: 'quest', name: 'Sealed Letter', maxStack: 1 });
 defItem('strongbox', { kind: 'quest', name: 'Strongbox', maxStack: 1 });
+defItem('toll_ticket', { kind: 'quest', name: 'Toll Ticket', maxStack: 1 });
+defItem('order_letter', { kind: 'quest', name: 'Order Letter', maxStack: 1 });
+defItem('iron_crate', { kind: 'quest', name: 'Crate of Iron Bars', maxStack: 1 });
+defItem('ledger_page', { kind: 'quest', name: 'Torn Ledger Page', maxStack: 1 });
+defItem('pell_key', { kind: 'quest', name: "Pell's Key", maxStack: 1 });
+defItem('magistrate_seal', { kind: 'quest', name: "Magistrate's Seal", maxStack: 1 });
+
+// --- The Order's gear (story): outfit pieces with stats and levels, and the materials that upgrade them ---
+for (const id of Object.keys(CONFIG.STORY.GEAR.PIECES)) {
+  const p = CONFIG.STORY.GEAR.PIECES[id];
+  defItem(id, { kind: 'gear', maxStack: 1, name: p.name, gear: Object.assign({ id }, p) });
+}
+for (const id of Object.keys(CONFIG.STORY.GEAR.MATERIALS)) {
+  defItem(id, { kind: 'material', maxStack: 99, name: CONFIG.STORY.GEAR.MATERIALS[id].name });
+}
 
 // --- Stack helpers -------------------------------------------------------------------
 /** New stack; tools start at full durability. */
@@ -72,6 +87,7 @@ function makeStack(id, count = 1) {
   if (!it) throw new Error('Unknown item ' + id);
   const s = { id, count };
   if (it.kind === 'tool') s.data = { dur: it.tool.durability };
+  if (it.kind === 'gear') s.data = { lvl: 1, eq: 0 };          // level, and whether it is worn
   return s;
 }
 
@@ -96,5 +112,6 @@ function stackLabel(s) {
   let t = it.name;
   if (it.kind === 'tool' && s.data) t += '  (' + s.data.dur + '/' + it.tool.durability + ')';
   if (it.kind === 'weapon' && s.data) t = CONFIG.RARITY[s.data.rarity].name + ' ' + it.name;
+  if (it.kind === 'gear' && s.data) t += '  (level ' + s.data.lvl + (s.data.eq ? ', worn' : '') + ')';
   return t;
 }

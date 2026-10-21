@@ -135,6 +135,8 @@ const Combat = {
    */
   applyDamage(game, target, amount, opts = {}) {
     if (!target || !target.alive || !(amount > 0) || !Number.isFinite(amount)) return 0;
+    // story: the Order's outfit turns some of a blow aside (falls ignore it)
+    if (target.isHuman && game.rules.story && opts.kind !== 'fall') amount *= Gear.damageTakenMult(target);
     const attacker = opts.attacker || null;
     if (attacker && attacker !== target && attacker.team && attacker.team === target.team && !game.rules.friendlyFire) return 0;
     const toShield = opts.ignoreShield ? 0 : Math.min(target.shield, amount);

@@ -11,9 +11,13 @@
  *    app - manifest, offline cache (sw.js), and an INSTALL button
  *    where the browser supports it. Not on file://, where browsers
  *    don't allow any of that.
+ *  - The Android and iPhone apps (native/): window.__phoneApp is set
+ *    there. They are full screen already, and their files come with
+ *    the app, so there is no full screen button and no offline cache.
  * ============================================================ */
 const AppShell = {
   native: !!(window.__nativeApp),
+  phone: !!(window.__phoneApp),
   installPrompt: null,
   listeners: [],
 
@@ -21,6 +25,7 @@ const AppShell = {
     const $ = (id) => document.getElementById(id);
     document.body.classList.toggle('app', this.native);
     const fsBtn = $('btnFullscreen'), quitBtn = $('btnQuitApp'), instBtn = $('btnInstall');
+    if (fsBtn && this.phone) fsBtn.hidden = true;
     if (fsBtn) fsBtn.addEventListener('click', () => this.toggleFullscreen());
     if (quitBtn) { quitBtn.hidden = !this.native; quitBtn.addEventListener('click', () => this.quit()); }
     window.addEventListener('keydown', (e) => {
@@ -32,19 +37,25 @@ const AppShell = {
 
     if (this.native) {
       // every key belongs to the game: an unhandled key makes macOS beep
-      window.addEventListener('keydown', (e) => {
+      // registered after the game's own key handlers, so they see a key before it is cancelled
+      setTimeout(() => window.addEventListener('keydown', (e) => {
         const t = e.target && e.target.tagName;
         if (e.metaKey || t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
         e.preventDefault();
-      });
+      }), 0);
       document.addEventListener('contextmenu', (e) => {
         const t = e.target && e.target.tagName;
         if (t !== 'INPUT' && t !== 'TEXTAREA') e.preventDefault();
       });
-    } else if (/^https?:$/.test(location.protocol)) {
+    } else if (/^https?:$/.test(location.protocol) && !this.phone) {
       this._webApp(instBtn);
     }
     this._changed();
+  },
+
+  /** iPhone Safari: the page can't go full screen, but an installed (home screen) copy opens without browser bars. */
+  isIOSBrowser() {
+    return /iPhone|iPad|iPod/.test(navigator.userAgent) && !(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
   },
 
   isFullscreen() {
@@ -53,6 +64,7 @@ const AppShell = {
   },
 
   toggleFullscreen(want) {
+    if (this.phone) return;      // the phone apps are full screen already
     const on = want === undefined ? !this.isFullscreen() : want;
     if (on === this.isFullscreen()) return;
     if (this.native) { this._post({ type: 'fullscreen' }); return; }
@@ -62,6 +74,10 @@ const AppShell = {
         const req = el.requestFullscreen || el.webkitRequestFullscreen;
         const p = req && req.call(el, { navigationUI: 'hide' });
         if (p && p.catch) p.catch(() => {});
+        // phones (Android Chrome): play sideways once the page is full screen (iPhone has no full screen API in Safari)
+        if (p && p.then && window.matchMedia && window.matchMedia('(pointer: coarse)').matches && screen.orientation && screen.orientation.lock) {
+          p.then(() => screen.orientation.lock('landscape').catch(() => {})).catch(() => {});
+        }
       } else {
         const exit = document.exitFullscreen || document.webkitExitFullscreen;
         const p = exit && exit.call(document);

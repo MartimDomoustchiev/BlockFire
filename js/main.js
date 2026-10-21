@@ -36,28 +36,102 @@
   const canvas = document.getElementById('gl');
   let renderer;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });     // edges are smoothed by the pixel ratio (High renders at 1.5x)
   } catch (e) {
     document.getElementById('err').style.display = 'block';
     document.getElementById('err').textContent = 'WebGL is not available in this browser: ' + e.message;
     return;
   }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  // graphics quality: render distance and pixel ratio presets, and a resolution that adapts to the frame rate.
+  // 'auto' (the default) stands for the preset that suits the graphics card: Ultra on a desktop card (render/post.js).
+  const gpuName = GpuTier.name(renderer);
+  const autoQuality = GpuTier.pick(gpuName, TouchUI.wanted());
+  if (params.has('quality')) settings.quality = params.get('quality');
+  const qualityName = () => (CONFIG.QUALITY[settings.quality] ? settings.quality : autoQuality);
+  const preset = () => CONFIG.QUALITY[qualityName()];
+  let post = null;                        // the Ultra preset's post-processing (render/post.js), made the first time it is needed
+  const dynRes = { scale: 1, slow: 0, fast: 0, ema: 16 };
+  function basePixelRatio() { return Math.min(window.devicePixelRatio || 1, preset().pixelRatio); }
+  function applyPixelRatio() {
+    // with post-processing the canvas stays at the screen's resolution: the resolution scale applies to the scene image
+    renderer.setPixelRatio(preset().post ? basePixelRatio() : Math.max(0.5, basePixelRatio() * dynRes.scale));
+  }
+  /** Anisotropic filtering on the story atlas (its shader keeps the mip level in step: render/story-materials.js). */
+  function applyTextureQuality() {
+    if (!storyMat) return;
+    const a = Math.max(1, Math.min(preset().aniso || 1, renderer.capabilities.getMaxAnisotropy()));
+    const tex = storyMat.shared.uAtlas.value;
+    if (tex.anisotropy !== a) { tex.anisotropy = a; tex.needsUpdate = true; }
+    storyMat.shared.uAniso.value = a;
+  }
+  /** A preset: the player picks it (render distance follows) or the page starts with it (distance kept as saved). */
+  function applyQuality(start) {
+    const p = preset();
+    CONFIG.STORY.NPC_DRAW_DIST = p.npcDraw;
+    if (p.post) { if (!post) post = new PostFX(renderer); post.configure(p.post); }
+    sky.clouds = p.clouds || 0;
+    dynRes.scale = 1;
+    applyTextureQuality();
+    if (!start) {
+      settings.renderDistance = p.rd; saveSettings(settings);
+      const rd = document.getElementById('rd'); if (rd) { rd.value = p.rd; document.getElementById('rdVal').textContent = p.rd + ' ch'; }
+      effectiveRd = p.rd; applyDistance();
+    }
+    applyPixelRatio(); layout();
+  }
+  /** Resolution scale: lower it while frames run long, raise it back when they are short. */
+  function adaptResolution(dt) {
+    const R = Object.assign({}, CONFIG.AUTO_RESOLUTION, preset().autoRes), ms = dt * 1000;
+    dynRes.ema += (ms - dynRes.ema) * Math.min(1, dt * 2);
+    if (!settings.autoResolution || state !== 'playing') { dynRes.slow = dynRes.fast = 0; return; }
+    if (dynRes.ema > R.SLOW_MS) { dynRes.slow += dt; dynRes.fast = 0; } else if (dynRes.ema < R.FAST_MS) { dynRes.fast += dt; dynRes.slow = 0; } else dynRes.slow = dynRes.fast = 0;
+    let changed = false;
+    if (dynRes.slow > R.SLOW_TIME && dynRes.scale > R.MIN + 1e-6) { dynRes.scale = Math.max(R.MIN, dynRes.scale - R.STEP); dynRes.slow = 0; changed = true; }
+    const top = R.MAX || 1;              // Ultra goes above 1 when frames are fast (a high refresh screen with time to spare)
+    if (dynRes.fast > R.FAST_TIME && dynRes.scale < top - 1e-6) { dynRes.scale = Math.min(top, dynRes.scale + R.STEP); dynRes.fast = 0; changed = true; }
+    if (changed) applyPixelRatio();
+  }
   renderer.autoClear = false;            // each view clears its own rectangle; the viewmodel draws on top
   renderer.info.autoReset = false;       // count every pass in the debug panel
   const scene = new THREE.Scene();
 
   const atlas = buildAtlasTexture();
   const materials = createChunkMaterials(atlas);
+  let storyMat = null;                    // story mode draws its own lit landscape (render/story-materials.js), built the first time it is needed
+  const materialsFor = (mode) => {
+    if (mode !== 'story') return materials;
+    if (!storyMat) { storyMat = createStoryMaterials(buildStoryAtlas()); applyTextureQuality(); }
+    return storyMat;
+  };
+  const mats = () => (game && game.world ? game.world.materials : materials);       // the materials of the world being drawn
+  let sunShadow = null;                   // story mode's sun shadows (render/shadow.js), sized by the quality preset
+  const shadowSize = () => Math.min(preset().shadow || 0, renderer.capabilities.maxTextureSize);
   Icons.init(atlas.image);
   DropVisuals.init(atlas);
   const input = new Input(canvas);
   const kbm = new KeyboardMouseController(input, settings);
   const pad = new GamepadController(settings, 0);
+  // touch controls (phones and tablets): the on-screen buttons feed the same Input object as the keyboard
+  const touch = TouchUI.wanted() ? new TouchUI(input, settings, { pause: () => pauseFromTouch() }) : null;
+  if (touch) { input.touch = true; document.body.classList.add('touch'); }
   const sky = new Sky(scene, new THREE.Object3D());
   const menu = new Menu(settings, onSettingChanged);
   const effects = new Effects(scene, atlas.image);
   const stormVisual = new StormVisual(scene);
+  // the start screen: your character on the stage, in the look you chose, with the Order's sword at its side
+  const startStage = new LobbyStage(renderer, document.getElementById('stageSlot'));
+  window.__lobby = startStage;     // tests and debugging: the start screen's stage
+  window.__gfx = () => ({ quality: qualityName(), auto: autoQuality, gpu: gpuName, post: !!(preset().post && post), ratio: post ? post.ratio : 0,
+    pixelRatio: renderer.getPixelRatio(), shadow: sunShadow ? [sunShadow.size, sunShadow.extent] : null, clouds: sky.clouds });
+  const autoOpt = document.querySelector('#quality option[value="auto"]');
+  if (autoOpt) autoOpt.textContent = 'Auto - ' + autoQuality[0].toUpperCase() + autoQuality.slice(1) + ' for this graphics card';
+  startStage.setLook(settings.look);
+  startStage.setHeld(makeStack('longsword'));
+  menu.lookChanged = (look) => startStage.setLook(look);
+  /** Player 2 (the gamepad) wears a different accent and top so the two are easy to tell apart. */
+  const p2Look = () => PLAYER_LOOK.normalize(Object.assign({}, settings.look, {
+    accent: (settings.look.accent + 3) % LOOK_ACCENTS.length, top: (settings.look.top + 4) % LOOK_TOPS.length,
+  }));
 
   // two HUD roots (the second is a clone of the first, shown in split-screen)
   const hudRoot1 = document.querySelector('.hud[data-player="0"]');
@@ -89,19 +163,30 @@
   window.__screens = screens;
   window.__views = views;        // tests
   const uiOpen = () => ui.isOpen || screens.isOpen;
-  ui.canOpen = () => state === 'playing' && isActive() && game && game.player && game.player.alive && !game.player.vehicle && !screens.isOpen;
+  ui.canOpen = () => state === 'playing' && isActive() && game && game.player && game.player.alive && !game.player.vehicle && !screens.isOpen && !(game && game.story);
 
   // ---- settings ------------------------------------------------------
   function setFog(underwater) {
     const far = underwater ? 20 : effectiveRd * CONFIG.CHUNK_SIZE * CONFIG.FOG.FAR_FRACTION;
-    materials.shared.uFogFar.value = far;
-    materials.shared.uFogNear.value = underwater ? 0.5 : far * CONFIG.FOG.NEAR_FRACTION;
+    const M = mats();
+    M.shared.uFogFar.value = far;
+    M.shared.uFogNear.value = underwater ? 0.5 : far * CONFIG.FOG.NEAR_FRACTION;
+  }
+  /** Story mode: the sun's shadow map for this frame, centred on the first view; off when the preset has none. */
+  function updateSunShadow(camera) {
+    const M = mats(), size = shadowSize(), extent = preset().shadowExtent || 46;
+    if (!M.story || !size) { if (M.shared.uShadowOn) M.shared.uShadowOn.value = 0; return; }
+    if (!sunShadow || sunShadow.size !== size || sunShadow.extent !== extent) { if (sunShadow) sunShadow.dispose(); sunShadow = new SunShadow(size, extent); }
+    sunShadow.bind(M.shared);
+    sunShadow.render(renderer, scene, M.shared, camera);
   }
   function applyDistance() {
     for (const v of views) { v.camera.far = effectiveRd * CONFIG.CHUNK_SIZE + 48; v.camera.updateProjectionMatrix(); }
     if (game) game.world.setRenderDistance(effectiveRd);
   }
   function onSettingChanged(key) {
+    if (key === 'quality') { applyQuality(false); return; }
+    if (key === 'autoResolution') { dynRes.scale = 1; applyPixelRatio(); return; }
     if (key === 'renderDistance' || key === 'dynamicRd') { effectiveRd = settings.renderDistance; applyDistance(); }
     if (key === 'volume') Sound.setVolume(settings.volume);
   }
@@ -117,6 +202,7 @@
   window.addEventListener('resize', layout);
   layout(); applyDistance();
   Sound.setVolume(settings.volume);
+  applyQuality(true);
 
   // ---- helpers for debug setups ----------------------------------------
   function giveKit(ch) {
@@ -252,18 +338,18 @@
     const seed = raw === '' ? (Math.random() * 0x7fffffff) | 0 : hashSeed(raw);
     currentMode = mode;
     effectiveRd = settings.renderDistance;
-    game = new Game({ scene, materials, seed, mode, renderDistance: effectiveRd });
+    game = new Game({ scene, materials: materialsFor(mode), seed, mode, renderDistance: effectiveRd });
     if (mode === 'duel') game.rules.respawn = settings.duelRespawn === 1;
     applyDistance();
 
-    const p1 = new Character({ name: mode === 'duel' ? 'Player 1' : netRole === 'host' ? (settings.playerName || 'Host') : 'You', controller: kbm, isLocal: true });
+    const p1 = new Character({ name: mode === 'duel' ? 'Player 1' : netRole === 'host' ? (settings.playerName || 'Host') : 'You', controller: kbm, isLocal: true, look: 'player', lookSpec: settings.look });
     p1.localIndex = 0;
     game.addEntity(p1);
     game.player = p1;
     const humans = [p1];
     active = [views[0]];
     if (mode === 'duel') {
-      const p2 = new Character({ name: 'Player 2', controller: pad, isLocal: true });
+      const p2 = new Character({ name: 'Player 2', controller: pad, isLocal: true, look: 'player', lookSpec: p2Look() });
       p2.localIndex = 1;
       game.addEntity(p2);
       game.player2 = p2;
@@ -381,6 +467,7 @@
     netRole = 'client';
     menu.netStatus('Connecting to room ' + code + '...');
     net = new NetClient(createTransport('client', code), settings.playerName || 'Player', {
+      look: () => settings.look,
       welcome: (m) => startReplica(m),
       restart: () => { resultsShown = false; views[0].match.hideResults(); },
       results: (r, winner) => {
@@ -393,6 +480,7 @@
       screen: (sc) => { if (game && game.player) ui.showRemote(game.player, sc); },
       closed: (reason) => {
         const r = reason;
+        resultsShown = false;                       // the results screen goes with the host's game
         if (game) { quitGame(); state = 'menu'; active = [views[0]]; layout(); }
         leaveNet();
         menu.netStatus(r);
@@ -411,13 +499,14 @@
     resultsAt = Infinity; resultsShown = false;
     views[0].match.hideResults();
     effectiveRd = settings.renderDistance;
-    game = new Game({ scene, materials, seed: m.seed, mode: m.mode, renderDistance: effectiveRd, replica: true });
+    game = new Game({ scene, materials: materialsFor(m.mode), seed: m.seed, mode: m.mode, renderDistance: effectiveRd, replica: true });
     game.rules.respawn = !!m.respawn;
     game._nextId = 1e9;
     game.timeOfDay = m.tod;
     applyDistance();
-    const me = new Character({ name: settings.playerName || 'Player', controller: new RecordingController(kbm, (it) => net && net.queueIntent(it)), isLocal: true });
+    const me = new Character({ name: settings.playerName || 'Player', controller: new RecordingController(kbm, (it) => net && net.queueIntent(it)), isLocal: true, look: 'player', lookSpec: settings.look });
     me.id = m.id;
+    if (game.rules.story) me.look = 'order';      // the same uniform as the host's copy of this player (Story.addPlayer)
     me.netPredicted = true;
     me.localIndex = 0;
     game.addEntity(me);
@@ -453,6 +542,11 @@
     g.events.on('storyScreen', (e) => { if (e.character && e.character === g.player && !uiOpen()) screens.open(e.screen, e); });
   }
 
+  /** The MENU button on touch screens: pause (the same as Esc, which needs a keyboard). */
+  function pauseFromTouch() {
+    if (game && state === 'playing' && !uiOpen() && !resultsShown) input.unlock();
+  }
+
   function quitToMenu() {
     quitGame();
     state = 'menu';
@@ -485,12 +579,23 @@
     input.lock();
   });
   menu.el.resume.addEventListener('click', () => { Sound.init(); input.lock(); });
+  // drag (or use the wheel) over the stage to turn and zoom the lobby character
+  const overlayEl = document.getElementById('overlay'), stageEl = document.getElementById('stageSlot');
+  let stageDrag = null;
+  overlayEl.addEventListener('pointerdown', (e) => { if (e.target === overlayEl || e.target === stageEl) stageDrag = { x: e.clientX }; });
+  window.addEventListener('pointermove', (e) => { if (stageDrag) { startStage.nudge((e.clientX - stageDrag.x) * 0.012, 0); stageDrag.x = e.clientX; } });
+  window.addEventListener('pointerup', () => { stageDrag = null; });
+  overlayEl.addEventListener('wheel', (e) => { if (e.target === overlayEl || e.target === stageEl) startStage.nudge(0, e.deltaY); }, { passive: true });
   menu.el.quit.addEventListener('click', () => quitToMenu());
   menu.onHost = () => { gameStarting(); hostGame(); };
   menu.onJoin = (code) => { gameStarting(); joinGame(code); };
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Enter' && netRole === 'host' && lobby && state === 'playing' && !ui.isOpen) startOnlineMatch();
+    if (e.code === 'Enter' && netRole === 'host' && lobby && state === 'playing' && !ui.isOpen && !e.altKey && !e.ctrlKey && !e.metaKey && !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) startOnlineMatch();
     if (e.code === 'KeyM' && !e.defaultPrevented && game && game.story && state === 'playing' && !uiOpen() && isActive() && game.player.alive) { e.preventDefault(); screens.open('map'); }
+    // story: J opens the journal (chapters, challenges, letters)
+    if (e.code === 'KeyJ' && !e.repeat && game && game.story && state === 'playing' && !uiOpen() && isActive()) { e.preventDefault(); screens.open('journal'); }
+    // story: Tab opens the Order's gear (the block inventory is not used in story)
+    if (e.code === 'Tab' && !e.repeat && game && game.story && state === 'playing' && !uiOpen() && isActive() && game.player.alive) { e.preventDefault(); screens.open('gear'); }
     if (e.code === 'KeyP' && !e.repeat && game && state === 'playing' && !uiOpen() && isActive() && !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) {
       // first / third-person camera (remembered separately for Story mode and the rest)
       const k = game.story ? 'thirdPersonStory' : 'thirdPerson';
@@ -533,6 +638,11 @@
     }
     const act = isActive();
     const online = netRole !== 'local';
+    if (touch) {
+      touch.setVisible(state === 'playing' && act && !uiOpen() && !resultsShown && !!game && !game.paused);
+      touch.setMode(game ? (game.rules.story ? 'story' : game.mode === 'build' ? 'build' : game.mode === 'sandbox' ? 'sandbox' : 'arena') : 'arena');
+    }
+    document.body.classList.toggle('playing', !!game && state === 'playing' && act);
     kbm.enabled = act && !uiOpen();
     menu.showOverlay(!act && !uiOpen() && !resultsShown && state !== 'loading', !!game);
     const islandLoad = game && game.rules.island && state === 'loading';
@@ -541,6 +651,7 @@
     const playing = state === 'playing' && (act || uiOpen() || online);
     for (const v of views) if (!active.includes(v) || !game) v.setHudVisible(false, false);
 
+    if (!game) startStage.update(frameDt);
     if (game) {
       // stream chunks around what each view shows (the player, or who they spectate)
       const eyes = active.map((v) => v.spectate || v.character).filter(Boolean);
@@ -614,7 +725,7 @@
         input.takeFrame();                                             // ignore input while paused/loading
         pad.flush();
       }
-      game.lightColor = materials.shared.uLight.value;
+      game.lightColor = mats().shared.uLight.value;
       game.render(frameDt);
       for (const v of active) {
         v.update(game, frameDt, {
@@ -633,28 +744,42 @@
       stormVisual.update(game);
       if (!resultsShown && game.match && game.time >= resultsAt) showResults();
       adaptDistance(frameDt);
+    adaptResolution(frameDt);
       Sound.update(frameDt, game);
     }
 
     // ---- draw every active view ----
-    const light = materials.shared.uLight.value;
+    const light = mats().shared.uLight.value;
     DropVisuals.tint(light);
     effects.update(frameDt, views[0].camera, light);
     if (game) CharacterModel.setLight(game, light);
     renderer.info.reset();
-    renderer.setScissorTest(false);
-    renderer.clear();
-    renderer.setScissorTest(true);
+    if (!game) {
+      // no game running: the start screen's stage
+      startStage.render(window.innerWidth, window.innerHeight);
+    } else {
+    // Ultra: every view draws into the post-processing image, which is finished onto the canvas below
+    const pp = preset().post ? post : null;
+    if (pp) pp.begin(window.innerWidth, window.innerHeight, Math.max(renderer.getPixelRatio(), preset().post.ssaa) * dynRes.scale);
+    else {
+      renderer.setScissorTest(false);
+      renderer.clear();
+      renderer.setScissorTest(true);
+    }
     for (const v of active) {
       const eyes = v.spectate || v.character;
       const underwater = !!game && !!eyes && eyes.headInWater && state === 'playing' && !v.spectate;
       setFog(underwater);
       sky.camera = v.camera;
-      sky.update(game ? game.timeOfDay : CONFIG.TIME.START, materials.shared, underwater);
-      v.viewmodel.light.copy(materials.shared.uLight.value);
-      v.render(renderer, scene);
+      if (mats().shared.uTime) mats().shared.uTime.value = now / 1000;
+      sky.update(game ? game.timeOfDay : CONFIG.TIME.START, mats().shared, underwater);
+      if (v === active[0]) updateSunShadow(v.camera);
+      v.viewmodel.light.copy(mats().shared.uLight.value);
+      v.render(renderer, scene, pp);
     }
-    renderer.setScissorTest(false);
+    if (pp) pp.end(window.innerWidth, window.innerHeight, active, sky.sunForRays(), !!mats().story);
+    else renderer.setScissorTest(false);
+    }
 
     frames++;
     if (now - fpsClock >= 500) { fps = Math.round(frames * 1000 / (now - fpsClock)); frames = 0; fpsClock = now; }
@@ -680,7 +805,8 @@
 
   function updateDebug() {
     const info = renderer.info.render;
-    let txt = 'BLOCKFIRE\n' + fps + ' FPS   draw calls ' + info.calls + '   tris ' + info.triangles + '   rd ' + effectiveRd;
+    let txt = 'BLOCKFIRE\n' + fps + ' FPS   draw calls ' + info.calls + '   tris ' + info.triangles + '   rd ' + effectiveRd +
+      '\ngraphics ' + qualityName() + (settings.quality === 'auto' ? ' (auto)' : '') + '   scale ' + dynRes.scale.toFixed(2) + '   gpu ' + (gpuName || '?');
     if (game) {
       const p = game.player, st = game.world.stats();
       txt += '\nmode ' + game.mode + '   xyz ' + p.pos.x.toFixed(1) + ' ' + p.pos.y.toFixed(1) + ' ' + p.pos.z.toFixed(1) +

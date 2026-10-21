@@ -7,12 +7,21 @@ class Inventory {
   constructor(size) {
     this.slots = new Array(size).fill(null);
     this.version = 0;
+    // optional rule (story mode): slotFits(i, stack) -> may this stack go into slot i? null = any slot takes anything
+    this.slotFits = null;
+  }
+
+  /** An empty slot that takes `stack` (hotbar first). -1 if none. */
+  firstEmptyFor(stack) {
+    for (let i = 0; i < this.slots.length; i++) if (!this.slots[i] && (!this.slotFits || this.slotFits(i, stack))) return i;
+    return -1;
   }
 
   get size() { return this.slots.length; }
   get(i) { return this.slots[i] || null; }
 
   set(i, s) {
+    if (!Number.isInteger(i) || i < 0 || i >= this.slots.length) return;     // never grow the array (indices can come from the network)
     this.slots[i] = s && s.count > 0 ? s : null;
     this.version++;
   }
@@ -52,8 +61,9 @@ class Inventory {
     if (it.kind === 'weapon' && this.weaponCount() >= CONFIG.MAX_WEAPONS) return 0;
     const max = it.maxStack;
     let room = 0;
-    for (const s of this.slots) {
-      if (!s) room += (stack.data || max === 1) ? 1 : max;
+    for (let i = 0; i < this.slots.length; i++) {
+      const s = this.slots[i];
+      if (!s) { if (!this.slotFits || this.slotFits(i, stack)) room += (stack.data || max === 1) ? 1 : max; }
       else if (canStack(s, stack)) room += max - s.count;
       if (room >= stack.count) return stack.count;
     }
@@ -82,7 +92,7 @@ class Inventory {
       }
     }
     while (left > 0) {
-      const i = this.firstEmpty();
+      const i = this.firstEmptyFor(stack);
       if (i < 0) break;
       const put = stack.data ? 1 : Math.min(left, max);
       const ns = { id: stack.id, count: put };

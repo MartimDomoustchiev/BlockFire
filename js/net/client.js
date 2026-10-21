@@ -60,7 +60,7 @@ class NetClient {
     transport.onOpen(() => {
       this.heardAt = performance.now();
       this.hooks.status('Connected - joining...');
-      this.t.send('host', { k: 'hello', name, v: NET.VERSION });
+      this.t.send('host', { k: 'hello', name, v: NET.VERSION, look: NetProto.look(this.hooks.look ? this.hooks.look() : null) });
     });
     transport.onMessage((id, m) => this._onMessage(m));
     transport.onClose(() => this._closed('The host left the game.'));
@@ -148,7 +148,7 @@ class NetClient {
     let e = null;
     const p = rec.p;
     switch (rec.t) {
-      case 'c': e = new Character({ name: rec.n, team: rec.tm, look: rec.lk || null }); e.isBot = !!rec.bot; e.teleport(p[0], p[1], p[2]); break;
+      case 'c': e = new Character({ name: rec.n, team: rec.tm, look: rec.lk || null, lookSpec: rec.ls ? NetProto.unlook(rec.ls) : null }); e.isBot = !!rec.bot; e.teleport(p[0], p[1], p[2]); break;
       case 'v': e = new Vehicle(rec.k); e.pos.set(p[0], p[1], p[2]); break;
       case 'd': e = new ItemDrop(NetProto.unstack(rec.s), p[0], p[1], p[2]); e.pickupDelay = Infinity; break;
       case 'p': {

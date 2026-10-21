@@ -436,9 +436,61 @@ const CONFIG = {
       { id: 'medkit', name: 'Field medkit', price: 45, give: [['medkit', 1]] },
       { id: 'shield', name: 'Shield tonic', price: 50, give: [['shield_potion', 1]] },
       { id: 'pistol', name: 'Pistol + 24 rounds (loud!)', price: 120, give: [['w_pistol', 1], ['ammo_light', 24]] },
+      { id: 'musket', name: 'Musket + 6 balls', price: 180, give: [['w_musket', 1], ['ammo_heavy', 6]] },
       { id: 'rounds', name: '24 light rounds', price: 20, give: [['ammo_light', 24]] },
+      { id: 'hood', name: 'Order Hood', price: 60, give: [['gear_hood', 1]] },
+      { id: 'cloak', name: "Traveller's Cloak", price: 70, give: [['gear_cloak', 1]] },
+      { id: 'bracers', name: 'Leather Bracers', price: 60, give: [['gear_bracers', 1]] },
+      { id: 'boots', name: 'Quiet Boots', price: 70, give: [['gear_boots', 1]] },
+      { id: 'shadow', name: 'Shadow Cowl', price: 130, give: [['gear_shadow', 1]] },
+      { id: 'coat', name: "Tollman's Coat", price: 150, give: [['gear_coat', 1]] },
+      { id: 'runner', name: 'Rooftop Boots', price: 140, give: [['gear_runner', 1]] },
+      { id: 'guards', name: 'Iron Guards', price: 220, give: [['gear_guards', 1]] },
+      { id: 'cloth', name: '3 cloth scraps', price: 9, give: [['cloth_scrap', 3]] },
+      { id: 'leather', name: '2 leather strips', price: 12, give: [['leather_strip', 2]] },
     ],
-  },
+    // The Order's gear (AC-style): outfit pieces with stats, a 5-slot loadout (hidden blade, sword, ranged, throwable,
+    // remedy) and upgrades at Ida's forge. Stats are points: attack 4 = +4% blade damage, defense 10 = 10% less damage
+    // taken, stealth 10 = guards notice you 10% more slowly.
+    GEAR: {
+      LOADOUT: [                 // hotbar slots 0-4 in story mode, and what each accepts
+        { name: 'Hidden blade', short: 'BLADE', ids: ['wrist_blade'] },
+        { name: 'Sword', short: 'SWORD', ids: ['longsword', 'sword'] },
+        { name: 'Ranged', short: 'RANGED', ids: ['w_bow', 'w_pistol', 'w_musket'] },
+        { name: 'Throwable', short: 'THROW', ids: ['w_smoke'] },
+        { name: 'Remedy', short: 'REMEDY', ids: ['bandage', 'medkit', 'shield_potion'] },
+      ],
+      SLOTS: ['head', 'cloak', 'bracers', 'boots'],
+      SLOT_NAMES: { head: 'Hood', cloak: 'Cloak', bracers: 'Bracers', boots: 'Boots' },
+      LEVEL_BONUS: 0.3,          // each level above 1 adds this share of the base stats
+      MAX_LEVEL: 3,
+      ATTACK_PER_POINT: 0.01,    // blade damage per attack point
+      DEFENSE_PER_POINT: 0.01,   // damage taken reduced per defense point
+      DEFENSE_CAP: 0.5,          // ...but never by more than this
+      STEALTH_PER_POINT: 0.01,   // awareness growth reduced per stealth point
+      STEALTH_CAP: 0.6,
+      PIECES: {
+        gear_hood:    { slot: 'head', name: 'Order Hood', rarity: 1, stats: { stealth: 6 }, price: 60, desc: 'Plain wool, drawn low. Eyes slide right past it.' },
+        gear_shadow:  { slot: 'head', name: 'Shadow Cowl', rarity: 2, stats: { stealth: 10, defense: 2 }, price: 130, desc: 'Dyed black, with a veil for the lower face.' },
+        gear_cloak:   { slot: 'cloak', name: "Traveller's Cloak", rarity: 1, stats: { defense: 3, stealth: 4 }, price: 70, desc: 'Heavy enough to turn a blade, grey enough to vanish in a crowd.' },
+        gear_coat:    { slot: 'cloak', name: "Tollman's Coat", rarity: 2, stats: { defense: 6, attack: 2 }, price: 150, desc: 'Taken from a collector. Good cloth, bad memories.' },
+        gear_bracers: { slot: 'bracers', name: 'Leather Bracers', rarity: 1, stats: { defense: 4 }, price: 60, desc: 'Stiff leather from wrist to elbow. Blades skid off.' },
+        gear_guards:  { slot: 'bracers', name: 'Iron Guards', rarity: 3, stats: { defense: 7, attack: 4 }, price: 220, desc: 'Forged in the smithy at the hideout. Heavy, and they hit back.' },
+        gear_boots:   { slot: 'boots', name: 'Quiet Boots', rarity: 1, stats: { stealth: 8 }, price: 70, desc: 'Soft soles. Gravel does not tell on you.' },
+        gear_runner:  { slot: 'boots', name: 'Rooftop Boots', rarity: 2, stats: { stealth: 5, attack: 1, defense: 2 }, price: 140, desc: 'Grip on tiles and rope. For people who go over the roofs.' },
+        // challenge gear: never sold, paid out by story challenges (js/story/challenges.js)
+        gear_veil:   { slot: 'head', name: 'Keep Veil', rarity: 3, stats: { stealth: 14, defense: 3 }, price: 0, desc: 'Woven from the keep\'s own banners. The Magistrate\'s men look straight through it.' },
+        gear_harrow: { slot: 'bracers', name: 'Harrow Guards', rarity: 3, stats: { defense: 9, attack: 6 }, price: 0, desc: 'Taken from a captain who did not expect a fight. Heavy, and they hit back.' },
+        gear_silent: { slot: 'boots', name: 'Silent Treads', rarity: 3, stats: { stealth: 14, attack: 2 }, price: 0, desc: 'Felt soles and a long stride. You arrive before the bell rings.' },
+        gear_ghost:  { slot: 'cloak', name: 'Ghost Mantle', rarity: 4, stats: { defense: 8, stealth: 10, attack: 3 }, price: 0, desc: 'The cloak the Order gives the last of its members. Nobody sees it come.' },
+      },
+      MATERIALS: {               // upgrade and trade goods (loot, contracts, the forge)
+        cloth_scrap: { name: 'Cloth Scraps', sell: 2 },
+        leather_strip: { name: 'Leather Strips', sell: 3 },
+      },
+      UPGRADE: [null, { silver: 40, cloth_scrap: 2, leather_strip: 1 }, { silver: 90, cloth_scrap: 4, leather_strip: 2, iron_ingot: 1 }],   // to reach level 2, 3
+      SELL: { bow: 25, pistol: 60, musket: 90, smoke: 12, arrow: 2, smoke_bomb: 6, ammo_light: 1, ammo_heavy: 3, bandage: 6, medkit: 18, shield_potion: 22, iron_ingot: 4 },
+    },  },
 
   // --- Day / night ------------------------------------------------------
   TIME: {
@@ -446,6 +498,21 @@ const CONFIG = {
     START: 0.38,               // 0 = midnight, 0.25 = sunrise, 0.5 = noon
     SKIP: 0.125,               // fraction of a day skipped by the N key (3 hours)
   },
+
+  // --- Graphics presets (Settings > Graphics): render distance in chunks, pixel ratio, story people drawn out to ---
+  // 'auto' in the settings picks one of these from the graphics card (GpuTier in render/post.js)
+  QUALITY: {
+    low:    { rd: 4, pixelRatio: 0.75, npcDraw: 60, shadow: 0, aniso: 1 },        // phones, older laptops
+    medium: { rd: 6, pixelRatio: 1.0, npcDraw: 75, shadow: 1024, aniso: 2 },      // shadow: size of the story mode's sun shadow map (0 = none)
+    high:   { rd: 8, pixelRatio: 1.5, npcDraw: 90, shadow: 4096, aniso: 4 },      // aniso: texture filtering at grazing angles
+    // desktop graphics cards: the scene drawn at 1.5x and filtered down (render/post.js), 4x MSAA, bloom, sun rays, a film
+    // grade, a shadow map twice as wide, cumulus clouds. Auto resolution keeps it smooth: down to 1x under ~57 frames per
+    // second, up to 2x above ~83 (a high refresh screen with time to spare)
+    ultra:  { rd: 12, pixelRatio: 2, npcDraw: 130, shadow: 8192, shadowExtent: 80, aniso: 16, clouds: 1,
+      post: { msaa: 4, ssaa: 1.5, bloom: 0.3, rays: 0.4, grade: 1, sharpen: 0.4, vignette: 0.22 },
+      autoRes: { SLOW_MS: 17.5, FAST_MS: 12, MIN: 0.67, MAX: 1.34 } },
+  },
+  AUTO_RESOLUTION: { MIN: 0.6, STEP: 0.1, SLOW_MS: 34, FAST_MS: 19, SLOW_TIME: 2.5, FAST_TIME: 6 },   // resolution scale 0.6-1 (see main.js)
 
   // --- Fog --------------------------------------------------------------
   FOG: {

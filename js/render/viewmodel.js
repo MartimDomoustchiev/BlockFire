@@ -80,7 +80,7 @@ class ViewModel {
 
   /** Forearm and hand geometry in the colours of `ch`'s outfit (rebuilt when the outfit changes). */
   _arms(ch) {
-    const key = (ch.look || 'ranger') + ':' + (ch.look ? 0 : (ch.team || ch.id));
+    const key = (ch.look || 'ranger') + ':' + (ch.look ? (ch.lookSpec ? JSON.stringify(ch.lookSpec) : 0) : (ch.team || ch.id));
     if (key === this.outfitKey) return this.armGeo;
     // a new outfit: rebuild every held model with the new arms
     if (this.current) this.holder.remove(this.current);

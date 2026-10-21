@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>BLOCKFIRE</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#14181f">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -335,6 +335,209 @@
   body.split .hud .itemName { bottom: 104px; }
   .hud .p2join { position: absolute; left: 50%; top: 40%; transform: translateX(-50%); padding: 8px 14px; background: rgba(0,0,0,.6);
     font-size: 15px; text-align: center; display: none; }
+
+  /* ---- lobby: the start screen (your character on the stage, mode cards, START) ---- */
+  #overlay { position: fixed; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(236px, 292px) minmax(0, 1fr) minmax(300px, 396px);
+    grid-template-areas: "top top top" "char stage side" "foot foot foot"; gap: 10px 14px; padding: 14px 18px 16px;
+    overflow: hidden; align-items: stretch; justify-items: stretch; justify-content: normal;
+    background: radial-gradient(ellipse at 46% 42%, rgba(0,0,0,0) 34%, rgba(5,7,11,.8) 100%); }
+  #overlay.hidden { display: none; }
+  #overlay.paused { background: rgba(8,10,14,.8); grid-template-columns: minmax(0, 1fr) minmax(300px, 430px) minmax(0, 1fr);
+    grid-template-areas: "top top top" ". side ." "foot foot foot"; }
+  #overlay.paused .charCard, #overlay.paused .stageSlot { display: none; }
+  .lobbyTop { grid-area: top; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .field input { width: 100%; min-width: 0; box-sizing: border-box; }
+  .brandBox h1 { font-size: 46px; margin: 0; }
+  .brandBox .sub { margin: 4px 0 0; color: var(--dim); font-size: 13px; letter-spacing: 1px; }
+  .lobbyTop .winctl { position: static; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .charCard, .side { width: auto; max-width: none; margin: 0; padding: 14px 16px; min-height: 0; overflow: auto; }
+  .charCard { grid-area: char; }
+  .side { grid-area: side; }
+  .charCard h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: 3px; color: var(--accent2); }
+  .stageSlot { grid-area: stage; min-height: 0; cursor: grab; touch-action: none; }
+  .stageSlot:active { cursor: grabbing; }
+  .lobbyFoot { grid-area: foot; display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .lobbyFoot #btnPlay { min-width: 340px; padding: 14px 24px; font-size: 20px; letter-spacing: 4px; }
+  .lobbyFoot #btnResume, .lobbyFoot #btnQuit { flex: 0 0 auto; min-width: 180px; }
+  .lobbyFoot #err { flex-basis: 100%; text-align: center; margin: 0; }
+  .field { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 8px; margin: 0 0 8px; }
+  .field .name { color: var(--dim); font-size: 12px; letter-spacing: 1px; }
+  .lookGrid { display: flex; flex-direction: column; gap: 7px; }
+  .lookRow { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 8px; }
+  .lookRow > span { color: var(--dim); font-size: 12px; letter-spacing: 1px; }
+  .swatches, .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .swatch { flex: 0 0 auto; width: 24px; height: 24px; padding: 0; border: 2px solid var(--edge); cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); }
+  .swatch:hover { background: var(--accent2); }
+  .swatch.sel { outline: 2px solid #fff; outline-offset: 2px; }
+  .chip { flex: 0 0 auto; padding: 5px 8px; font-size: 12px; letter-spacing: 0; background: #2a313d; color: var(--dim); box-shadow: none; }
+  .chip:hover { background: #3a4456; }
+  .chip.sel { background: var(--accent); color: #1a1006; }
+  .lookToggles { display: flex; gap: 16px; margin: 2px 0 0 82px; font-size: 13px; }
+  .lookToggles label { margin: 0; gap: 6px; }
+  .lookActions { margin-top: 10px; }
+  .lookActions button { width: 100%; padding: 9px; font-size: 13px; }
+  #lookDesc { margin: 8px 0 0; min-height: 16px; }
+  .kicker { margin: 0 0 8px; font-size: 11px; letter-spacing: 3px; color: var(--accent2); }
+  .side .modes { grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 8px; }
+  .side .mode { display: grid; grid-template-columns: 38px 1fr; gap: 10px; align-items: center; padding: 9px 10px; min-height: 66px; }
+  .side .mode.story { grid-column: 1 / -1; }
+  .mode .ico { display: block; width: 38px; height: 38px; padding: 6px; background: #161b23; border: 2px solid var(--edge); box-sizing: border-box; }
+  .mode .ico svg { display: block; width: 100%; height: 100%; }
+  .mode .ico path, .mode .ico circle, .mode .ico rect, .mode .ico ellipse { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+  .mode.sel .ico { color: var(--accent2); border-color: var(--accent); }
+  .mode .mtxt { display: block; }
+  .mode .mtxt b { font-size: 13px; }
+  .mode .mtxt span { font-size: 11px; line-height: 1.3; }
+  .side .modeOpts { display: flex; flex-direction: column; }
+  .side .modeOpts .opt { display: flex; }
+  .modeHint { margin: 8px 0 0; min-height: 16px; }
+  .side #netStatus { min-height: 16px; }
+  .side .keys { font-size: 11px; }
+  .side .cols { grid-template-columns: 1fr; gap: 10px; }
+  .side input[type=range] { min-width: 0; }
+  .side .online-box label { display: flex; }
+  .side .tabs { flex-wrap: wrap; }
+  .side .tabs .tab { padding: 7px 10px; font-size: 12px; letter-spacing: 1px; }
+
+  @media (max-height: 720px) {
+    .brandBox h1 { font-size: 32px; letter-spacing: 4px; }
+    .brandBox .sub { display: none; }
+    .lobbyFoot #btnPlay { padding: 10px 18px; font-size: 17px; }
+    .side .mode { min-height: 0; padding: 7px 9px; }
+    .side .mode .ico { width: 30px; height: 30px; }
+  }
+  @media (max-width: 860px) {
+    #overlay { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 40vh auto auto auto; overflow-y: auto; overflow-x: hidden;
+      grid-template-areas: "top" "stage" "side" "char" "foot"; align-content: start; }
+    #overlay.paused { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "side" "foot"; }
+    .charCard, .side { overflow: visible; min-height: auto; }
+    .stageSlot { min-height: 40vh; }
+    .brandBox .sub { display: none; }
+    .brandBox h1 { font-size: 34px; }
+    .lobbyFoot #btnPlay { min-width: 0; width: 100%; }
+    .lobbyFoot #btnResume, .lobbyFoot #btnQuit { min-width: 0; flex: 1 1 40%; }
+    .side .modes { grid-template-columns: 1fr; }
+  }
+
+  /* ---- story: the loadout on the hotbar, and the Order's gear screen (Tab) ---- */
+  .hud .hotbar.loadout { gap: 8px; }
+  .hud .hotbar.loadout .slot { --slot: 50px; }
+  .hud .loadLbl { display: none; }
+  .hud .hotbar.loadout .loadLbl { display: block; position: absolute; left: 0; right: 0; top: -16px; text-align: center; font-style: normal;
+    font-size: 10px; letter-spacing: 1px; color: #ffe0a8; text-shadow: 1px 1px 0 #000; white-space: nowrap; }
+  #storyScreen .gearPanel { width: min(960px, 96vw); max-height: 94vh; overflow: auto; padding: 14px 16px; user-select: none; }
+  .gHead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding-bottom: 8px; margin-bottom: 10px; border-bottom: 2px solid var(--edge); }
+  .gHead h2 { margin: 0; }
+  .gSilver { color: #e6e9ee; font-weight: bold; letter-spacing: 1px; }
+  .gHint { margin-left: auto; color: var(--dim); font-size: 11px; }
+  .gBody { display: grid; grid-template-columns: 236px minmax(0, 1fr) 300px; gap: 14px; }
+  .gLabel { margin-bottom: 6px; font-size: 11px; letter-spacing: 2px; color: var(--accent2); }
+  .gLRow { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .gLRow b { color: var(--dim); }
+  .gLRow span { font-size: 13px; }
+  .gFig { position: relative; height: 330px; background: radial-gradient(ellipse at 50% 30%, #26324a, #111720 72%); border: 2px solid var(--edge); }
+  .gFig > svg { position: absolute; left: 50%; top: 50%; height: 290px; transform: translate(-50%, -50%); fill: #2b3445; }
+  .gWorn { position: absolute; width: 58px; text-align: center; }
+  .gWorn em { display: block; margin-top: 2px; font-style: normal; font-size: 10px; letter-spacing: 1px; color: var(--dim); }
+  .gWorn .slot.empty { opacity: .45; }
+  .g-head { left: 50%; top: 8px; margin-left: -29px; }
+  .g-cloak { left: 10px; top: 104px; }
+  .g-bracers { right: 10px; top: 150px; }
+  .g-boots { left: 50%; bottom: 8px; margin-left: -29px; }
+  .gStats { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .gStat { display: grid; grid-template-columns: 74px 1fr 96px; align-items: center; gap: 8px; font-size: 12px; }
+  .gStat span { color: var(--dim); letter-spacing: 1px; }
+  .gStat i { display: block; height: 10px; background: #0f1319; border: 2px solid var(--edge); }
+  .gStat b { display: block; height: 100%; background: linear-gradient(#ffd34a, #ff8a2f); }
+  .gStat em { font-style: normal; text-align: right; color: #ffe0a8; }
+  .gPack { min-width: 0; }
+  .gTabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .gTab { flex: 0 0 auto; padding: 5px 8px; font-size: 11px; letter-spacing: 1px; background: #2a313d; color: var(--dim); box-shadow: none; }
+  .gTab.sel { background: var(--accent); color: #1a1006; }
+  .gGrid { display: grid; grid-template-columns: repeat(6, 44px); gap: 3px; }
+  .gSlot { cursor: pointer; }
+  .gSlot.dim { opacity: .3; }
+  .gSlot.sel, .gLRow .slot.sel, .gWorn .slot.sel { outline: 2px solid #fff; outline-offset: 1px; }
+  .gSlot.worn::after { content: "W"; position: absolute; right: 2px; top: 0; font-size: 10px; color: #9fe0ff; font-weight: bold; text-shadow: 1px 1px 0 #000; }
+  .gDetail { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; margin-top: 12px; padding: 10px 12px; background: #161b23; border: 2px solid var(--edge); }
+  .gDName { font-size: 16px; font-weight: bold; letter-spacing: 1px; }
+  .gDText { margin-top: 4px; font-size: 12px; color: #c3cad6; white-space: pre-line; }
+  .gDStats { margin-top: 4px; font-size: 12px; color: var(--accent2); }
+  .gDBtns { display: flex; flex-direction: column; gap: 6px; }
+  .gDBtns button { width: 150px; padding: 9px 8px; font-size: 13px; }
+  .gDBtns button:disabled { opacity: .45; }
+  @media (max-width: 860px) {
+    .gBody { grid-template-columns: 1fr; }
+    .gFig { height: 260px; }
+    .gGrid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .gGrid .slot { width: auto; }
+    .gDetail { grid-template-columns: 1fr; }
+    .gHint { display: none; }
+  }
+
+  /* ---- close buttons on the screens (touch has no Escape key) ---- */
+  .panel { position: relative; }
+  .sClose { position: absolute; right: 12px; top: 12px; width: auto; padding: 6px 12px; font-size: 12px; letter-spacing: 1px; }
+  .gHead .sClose { position: static; margin-left: 10px; }
+  /* ---- story: the journal (J): chapters, challenges, letters ---- */
+  #storyScreen .journal { width: min(980px, 96vw); max-height: 92vh; overflow: auto; padding: 14px 16px; }
+  #storyScreen .journal h2 { margin: 0 0 6px; }
+  #storyScreen .journal h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: 2px; color: var(--accent2); }
+  #storyScreen .tally { margin: 0 0 10px; color: #ffe0a8; }
+  .jCols { display: grid; grid-template-columns: 0.8fr 1.3fr 1.2fr; gap: 14px; }
+  .jList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 66vh; overflow: auto; }
+  .jList li { font-size: 12px; color: var(--dim); padding: 6px 8px; background: #161b23; border-left: 3px solid #3a4456; line-height: 1.35; }
+  .jList li.done { color: #e8edf4; border-left-color: #7af06e; }
+  .jList li i { font-style: normal; color: #7af06e; }
+  .jList li b { color: #fff; font-weight: normal; }
+  .jList li span { display: block; margin-top: 2px; color: var(--dim); }
+  .jList li em { font-style: normal; color: #ffd34a; }
+  .jList li .unread { color: #6f7c90; font-style: italic; }
+  @media (max-width: 860px) { .jCols { grid-template-columns: 1fr; } .jList { max-height: none; } }
+
+  /* ---- touch controls (phones and tablets; js/input/touch.js) ---- */
+  html, body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  #touchUi { position: fixed; inset: 0; z-index: 8; pointer-events: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #touchUi[hidden] { display: none; }
+  #touchUi .tLook { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
+  #touchUi .tStick { position: absolute; left: max(18px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); width: 148px; height: 148px;
+    border-radius: 50%; background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.3); pointer-events: auto; touch-action: none; }
+  #touchUi .tStick i { position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%;
+    background: rgba(255,210,120,.42); border: 2px solid rgba(255,230,170,.85); pointer-events: none; }
+  #touchUi .tBtn { position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%; border: 2px solid rgba(255,255,255,.4);
+    background: rgba(18,22,30,.6); color: #fff; font: bold 11px monospace; letter-spacing: 1px; width: 62px; height: 62px; padding: 0; box-shadow: none; }
+  #touchUi .tBtn:hover { background: rgba(18,22,30,.6); }
+  #touchUi .tBtn.on { background: rgba(255,122,47,.8); border-color: #fff; }
+  #touchUi .tFire { right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); width: 96px; height: 96px; font-size: 14px;
+    background: rgba(230,80,40,.55); }
+  #touchUi .tAim { right: 122px; bottom: 26px; width: 72px; height: 72px; }
+  #touchUi .tJump { right: 28px; bottom: 126px; width: 72px; height: 72px; }
+  #touchUi .tReload { right: 128px; bottom: 116px; width: 56px; height: 56px; }
+  #touchUi .tUse { right: 196px; bottom: 96px; width: 58px; height: 58px; }
+  #touchUi .tCrouch { left: 172px; bottom: 150px; width: 58px; height: 58px; }
+  #touchUi .tNext { right: 100px; bottom: 214px; width: 52px; height: 52px; }
+  #touchUi .tInv, #touchUi .tBuild, #touchUi .tGear, #touchUi .tMap, #touchUi .tJournal, #touchUi .tFly { top: 12px; width: 52px; height: 52px; font-size: 10px; }
+  /* top-left row: INV at 12 (arena, explore, build); GEAR, BUILD at 72 (story, build); MAP, FLY at 128; JOURNAL at 184 */
+  #touchUi .tInv { left: 12px; } #touchUi .tGear, #touchUi .tBuild { left: 72px; } #touchUi .tMap, #touchUi .tFly { left: 128px; } #touchUi .tJournal { left: 184px; }
+
+  #touchUi .tMenu { top: max(12px, env(safe-area-inset-top)); right: 140px; width: 52px; height: 52px; font-size: 10px; }
+  body.touch .hud .vitals { left: 18px; bottom: 246px; width: 230px; }
+  body.touch .hud .mats { right: auto; left: 50%; top: 40px; bottom: auto; transform: translateX(-50%); flex-direction: row; gap: 10px; }
+  body.touch .hud .ammo { left: 50%; right: auto; bottom: 66px; transform: translateX(-50%); text-align: center; }
+  body.touch .hud .hotbar { bottom: 8px; }
+  body.touch .hud .hotbar .slot { --slot: 40px; }
+  body.touch .hud .storyStealth { left: 18px; bottom: 214px; }
+  body.touch .hud .buildbar { bottom: 62px; }
+  body.touch .hud .prompt, body.touch .hud .storyPrompt { top: calc(50% + 40px); }
+  body.touch .storyObj { max-width: 42vw; top: 72px; }
+  .storyToast { white-space: normal; width: max-content; max-width: 92vw; text-align: center; }
+  body.touch .hud .minimap { transform: scale(.6); transform-origin: top right; }
+  #rotateHint { display: none; position: fixed; inset: 0; z-index: 30; align-items: center; justify-content: center; background: #0b0e13; color: #ffd34a;
+    font-size: 20px; letter-spacing: 2px; text-align: center; padding: 24px; }
+  @media (orientation: portrait) and (pointer: coarse) { body.playing #rotateHint { display: flex; } }
+  body.touch.playing #overlay { display: none; }
 </style>
 </head>
 <body>
@@ -371,6 +574,7 @@
   <div class="p2join"></div>
 </div>
 <pre id="debug"></pre>
+<div id="rotateHint">Turn your phone sideways to play</div>
 <div id="netBadge" style="display:none"></div>
 <div id="lobby" style="display:none"></div>
 <div id="loading"><div id="loadingText">GENERATING WORLD</div><small>building terrain on worker threads…</small><div class="lbar"><i id="loadingBar"></i></div></div>
@@ -379,6 +583,7 @@
 <div id="screen" class="hidden">
   <div class="panel">
     <h2 id="screenTitle">Inventory</h2>
+    <button id="screenClose" class="alt sClose">CLOSE</button>
     <div id="screenTop"></div>
     <div class="inv-label">INVENTORY</div>
     <div id="screenMain" class="grid9"></div>
@@ -389,14 +594,29 @@
 <div id="tooltip"></div>
 
 <div id="overlay">
-  <div class="panel menu">
+  <header class="lobbyTop">
+    <div class="brandBox">
+      <h1>BLOCKFIRE</h1>
+      <p class="sub" id="menuSub">build, climb, shoot. pick your look, then pick a mode.</p>
+    </div>
     <div class="winctl">
       <button id="btnInstall" class="alt" hidden title="Install BLOCKFIRE as an app">INSTALL APP</button>
       <button id="btnFullscreen" class="alt" title="Full screen (Alt/Option + Enter)">FULL SCREEN</button>
       <button id="btnQuitApp" class="alt" hidden>QUIT</button>
     </div>
-    <h1>BLOCKFIRE</h1>
-    <p class="sub" id="menuSub">an offline voxel battle sandbox</p>
+  </header>
+
+  <div class="charCard panel" id="charCard" aria-label="Your character">
+    <h2>YOUR CHARACTER</h2>
+    <label class="field"><span class="name">Name</span><input type="text" id="playerName" maxlength="16" spellcheck="false" placeholder="Player"></label>
+    <div class="lookGrid" id="lookGrid"></div>
+    <div class="lookActions"><button id="btnRandomLook" class="alt">RANDOMISE</button></div>
+    <p class="hint" id="lookDesc"></p>
+  </div>
+
+  <div class="stageSlot" id="stageSlot" aria-hidden="true"></div>
+
+  <div class="side panel" aria-label="Menu">
     <div class="tabs">
       <button class="tab sel" data-tab="play">PLAY</button>
       <button class="tab" data-tab="settings">SETTINGS</button>
@@ -405,35 +625,34 @@
     </div>
 
     <section data-tab="play">
-      <div class="modes">
-        <button class="mode" data-mode="battle"><b>SOLO VS BOTS</b><span>Island battle royale with a shrinking storm</span></button>
-        <button class="mode" data-mode="duel"><b>SPLIT-SCREEN DUEL</b><span>Player 1 keyboard + mouse, player 2 gamepad</span></button>
-        <button class="mode" data-mode="build"><b>FREE BUILD</b><span>No enemies, no storm, endless materials</span></button>
-        <button class="mode" data-mode="sandbox"><b>EXPLORE</b><span>Infinite world: mine, craft, loot, drive</span></button>
-        <button class="mode story" data-mode="story"><b>STORY</b><span>Stealth campaign: climb, hide, take down the Magistrate's men</span></button>
+      <p class="kicker">CHOOSE A MODE</p>
+      <div class="modes" id="modeCards"></div>
+      <div class="modeOpts">
+        <label class="opt opt-battle"><span class="name">Bots</span><input type="range" id="bots" min="1" max="7" step="1"><span class="val" id="botsVal"></span></label>
+        <label class="opt opt-battle opt-duel"><span class="name">Bot difficulty</span>
+          <select id="difficulty"><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option></select></label>
+        <label class="opt opt-duel"><span class="name">Duel bots</span><input type="range" id="duelBots" min="0" max="6" step="1"><span class="val" id="duelBotsVal"></span></label>
+        <label class="opt opt-duel"><span class="name">Duel rules</span>
+          <select id="duelRespawn"><option value="0">Last one standing</option><option value="1">Respawn - first to 5 kills</option></select></label>
+        <label class="opt opt-story"><span class="name">Story</span>
+          <select id="storyNew"><option value="0">Continue</option><option value="1">Start a new story (erases the save)</option></select></label>
+        <label class="opt opt-battle opt-duel opt-build opt-sandbox"><span class="name">World seed</span><input type="text" id="seed" maxlength="32" placeholder="random" spellcheck="false"></label>
       </div>
-      <label class="opt opt-battle"><span class="name">Bots</span><input type="range" id="bots" min="1" max="7" step="1"><span class="val" id="botsVal"></span></label>
-      <label class="opt opt-battle opt-duel"><span class="name">Bot difficulty</span>
-        <select id="difficulty"><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option></select></label>
-      <label class="opt opt-duel"><span class="name">Duel bots</span><input type="range" id="duelBots" min="0" max="6" step="1"><span class="val" id="duelBotsVal"></span></label>
-      <label class="opt opt-duel"><span class="name">Duel rules</span>
-        <select id="duelRespawn"><option value="0">Last one standing</option><option value="1">Respawn - first to 5 kills</option></select></label>
-      <label class="opt opt-story"><span class="name">Story</span>
-        <select id="storyNew"><option value="0">Continue</option><option value="1">Start a new story (erases the save)</option></select></label>
-      <p class="opt opt-story hint">Climb anything (W + SPACE against a wall), sneak with C, hide in hay and bushes, take enemies down
-        from behind or above with your wrist blade. M opens the map. Play it with friends from the ONLINE tab.</p>
-      <label class="opt opt-battle opt-duel opt-build opt-sandbox"><span class="name">World seed</span><input type="text" id="seed" maxlength="32" placeholder="random" spellcheck="false"></label>
+      <p class="hint modeHint" id="modeHint"></p>
     </section>
 
     <section data-tab="settings" hidden>
       <label><span class="name">Render distance</span><input type="range" id="rd" min="3" max="16" step="1"><span class="val" id="rdVal"></span></label>
+      <label><span class="name">Graphics</span><select id="quality"><option value="auto">Auto - best for this graphics card</option><option value="low">Low - phones, older laptops</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra - desktop graphics cards</option></select></label>
+      <label><span class="name">Auto resolution</span><input type="checkbox" id="autoResolution"><span class="hint">sharpen or soften the picture to keep the frame rate up</span></label>
       <label><span class="name">Auto distance</span><input type="checkbox" id="dynamicRd"><span class="hint">lower it when the frame rate drops</span></label>
       <label><span class="name">Field of view</span><input type="range" id="fov" min="60" max="110" step="1"><span class="val" id="fovVal"></span></label>
       <label><span class="name">Mouse sensitivity</span><input type="range" id="sens" min="0.2" max="3" step="0.1"><span class="val" id="sensVal"></span></label>
       <label><span class="name">Gamepad look</span><input type="range" id="padSens" min="0.3" max="3" step="0.1"><span class="val" id="padSensVal"></span></label>
+      <label><span class="name">Touch look</span><input type="range" id="touchLook" min="0.4" max="2.5" step="0.1"><span class="val" id="touchLookVal"></span><span class="hint">drag on phones and tablets</span></label>
       <label><span class="name">Volume</span><input type="range" id="volume" min="0" max="1" step="0.05"><span class="val" id="volumeVal"></span></label>
       <label><span class="name">Story camera</span><input type="checkbox" id="thirdPersonStory"><span class="hint">third person over the shoulder in Story mode (P switches in any mode)</span></label>
-      <label><span class="name">Full screen</span><input type="checkbox" id="startFullscreen"><span class="hint">switch to full screen when a game starts (Alt/Option + Enter any time)</span></label>
+      <label><span class="name">Full screen</span><input type="checkbox" id="startFullscreen"><span class="hint">switch to full screen when a game starts (Alt/Option + Enter any time). iPhone: Share, then Add to Home Screen, for a full-screen app.</span></label>
     </section>
 
     <section data-tab="controls" hidden>
@@ -479,12 +698,17 @@
           <b>D-pad down</b><span>switch seat</span>
           <b>Right stick click</b><span>crouch</span>
           <b>Start</b><span>pause</span>
+          <b class="sh">TOUCH (PHONE, TABLET)</b><span></span>
+          <b>Left stick</b><span>move (push fully forward: sprint)</span>
+          <b>Drag the screen</b><span>look</span>
+          <b>FIRE / AIM / JUMP</b><span>the big buttons: shoot or mine, aim or block, jump or climb</span>
+          <b>RELOAD / USE / NEXT</b><span>reload, interact, next item; CROUCH sneaks</span>
+          <b>GEAR / MAP / INV / BUILD</b><span>menus for the mode you play</span>
         </div>
       </div>
     </section>
 
     <section data-tab="online" hidden>
-      <label><span class="name">Your name</span><input type="text" id="playerName" maxlength="16" spellcheck="false" placeholder="Player"></label>
       <div class="online-box">
         <b>HOST</b>
         <p class="hint">Starts the mode picked on the PLAY tab as an online game (Solo vs Bots becomes an online battle with your friends;
@@ -497,19 +721,18 @@
         <button id="btnJoin" class="alt">JOIN GAME</button>
       </div>
       <p class="hint">Online play needs an internet connection: players find each other through the free PeerJS matchmaking
-        service, then play peer-to-peer. Single-player modes stay fully offline.</p>
+        service, then play peer-to-peer. Single-player modes stay fully offline. Your character travels with you.</p>
       <div id="netStatus"></div>
     </section>
-
-    <div class="row">
-      <button id="btnPlay">START</button>
-      <button id="btnResume" class="alt" hidden>RESUME</button>
-      <button id="btnQuit" class="alt" hidden>QUIT TO MENU</button>
-    </div>
-    <div id="err"></div>
   </div>
-</div>
 
+  <footer class="lobbyFoot">
+    <button id="btnPlay" class="go">START</button>
+    <button id="btnResume" class="alt" hidden>RESUME</button>
+    <button id="btnQuit" class="alt" hidden>QUIT TO LOBBY</button>
+    <div id="err"></div>
+  </footer>
+</div>
 <script src="three.min.js"></script>
 <script src="js/constants.js"></script>
 <script src="vendor/peerjs.min.js"></script>
@@ -536,9 +759,14 @@
 <script src="js/build/building.js"></script>
 <script src="js/render/textures.js"></script>
 <script src="js/render/materials.js"></script>
+<script src="js/render/story-textures.js"></script>
+<script src="js/render/story-materials.js"></script>
+<script src="js/render/shadow.js"></script>
+<script src="js/render/post.js"></script>
 <script src="js/render/sky.js"></script>
 <script src="js/render/icons.js"></script>
 <script src="js/render/overlays.js"></script>
+<script src="js/render/looks.js"></script>
 <script src="js/render/models.js"></script>
 <script src="js/render/viewmodel.js"></script>
 <script src="js/render/effects.js"></script>
@@ -547,6 +775,7 @@
 <script src="js/input/input.js"></script>
 <script src="js/input/controllers.js"></script>
 <script src="js/input/gamepad.js"></script>
+<script src="js/input/touch.js"></script>
 <script src="js/entities/entity.js"></script>
 <script src="js/entities/interaction.js"></script>
 <script src="js/entities/character.js"></script>
@@ -564,6 +793,10 @@
 <script src="js/story/blade.js"></script>
 <script src="js/story/poster.js"></script>
 <script src="js/story/missions.js"></script>
+<script src="js/story/missions-extra.js"></script>
+<script src="js/story/missions-more.js"></script>
+<script src="js/story/challenges.js"></script>
+<script src="js/story/gear.js"></script>
 <script src="js/story/story.js"></script>
 <script src="js/story/mirror.js"></script>
 <script src="js/core/game.js"></script>
@@ -578,7 +811,9 @@
 <script src="js/ui/match-hud.js"></script>
 <script src="js/ui/story-hud.js"></script>
 <script src="js/ui/story-screens.js"></script>
+<script src="js/ui/gear-screen.js"></script>
 <script src="js/ui/player-view.js"></script>
+<script src="js/ui/lobby-stage.js"></script>
 <script src="js/audio/audio.js"></script>
 <script src="js/net/transport.js"></script>
 <script src="js/net/protocol.js"></script>

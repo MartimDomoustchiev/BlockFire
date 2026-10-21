@@ -88,6 +88,7 @@ const Blade = {
   /** A melee blow from `a` lands on `t`: blocked, parried or taken. */
   hit(game, a, t, dmg, cls) {
     const S = CONFIG.STORY.SWORD;
+    if (a.isHuman && game.rules.story) dmg *= Gear.attackMult(a);          // the Order's gear adds to every cut
     // a player's raised sword
     if (t.blocking && this.facing(t, a)) {
       if (game.time - (t.blockSince || 0) <= S.PARRY && a.npc) {

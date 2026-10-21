@@ -30,6 +30,9 @@ class InventoryUI {
     });
     window.addEventListener('keydown', (e) => this._onKey(e));
     this.root.addEventListener('contextmenu', (e) => e.preventDefault());
+    // touch screens have no Escape key: the screen's own CLOSE button
+    const closeBtn = document.getElementById('screenClose');
+    if (closeBtn) closeBtn.addEventListener('click', () => { if (performance.now() - this.openedAt > 350) this.close(true); });
     this.root.addEventListener('mousedown', (e) => { if (e.target === this.root) e.preventDefault(); });
   }
 
@@ -58,6 +61,7 @@ class InventoryUI {
   }
 
   _show(ch, session) {
+    this.openedAt = performance.now();
     this.ch = ch;
     this.session = session;
     this.isOpen = true;

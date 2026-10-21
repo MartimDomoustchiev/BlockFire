@@ -49,22 +49,35 @@ class HotbarHud {
       const k = document.createElement('b');
       k.className = 'key';
       k.textContent = i + 1;
+      const lbl = document.createElement('i');
+      lbl.className = 'loadLbl';
       const inner = document.createElement('div');
       inner.className = 'inner';
-      s.appendChild(inner); s.appendChild(k);
+      s.appendChild(inner); s.appendChild(k); s.appendChild(lbl);
       this.root.appendChild(s);
       this.slots.push({ el: s, inner });
     }
     this.lastSel = -1;
     this.lastHeldId = null;
     this.nameTimer = 0;
+    this.count = CONFIG.HOTBAR_SLOTS;     // story mode shows the five-slot loadout instead
+  }
+
+  /** Story: only the loadout's slots, each labelled (hidden blade, sword, ranged, throwable, remedy). Null restores the hotbar. */
+  setLoadout(names) {
+    this.count = names ? names.length : CONFIG.HOTBAR_SLOTS;
+    this.slots.forEach((sl, i) => {
+      sl.el.style.display = i < this.count ? '' : 'none';
+      sl.el.querySelector('.loadLbl').textContent = names ? names[i] : '';
+    });
+    this.root.classList.toggle('loadout', !!names);
   }
 
   setVisible(v) { this.root.style.display = v ? '' : 'none'; if (!v) this.nameEl.style.opacity = 0; }
 
   update(ch, frameDt) {
     if (!ch) return;
-    for (let i = 0; i < this.slots.length; i++) {
+    for (let i = 0; i < this.count; i++) {
       renderSlot(this.slots[i].inner, ch.inventory.get(i));
       this.slots[i].el.classList.toggle('sel', i === ch.selectedSlot);
     }

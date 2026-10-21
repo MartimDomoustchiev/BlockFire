@@ -34,6 +34,8 @@ class Chunk {
     this.removed = false;
     this.meshOpaque = null;
     this.meshWater = null;
+    this.meshGround = null;            // story mode: the smooth ground skin
+    this.meshProps = null;             // story mode: palms and reeds
   }
 }
 
@@ -81,7 +83,7 @@ class World {
       w.onmessage = (e) => this._onMessage(w, e.data);
       w.onerror = (e) => { this.error = 'Worker error: ' + e.message; console.error(this.error, e); };
       w.postMessage({
-        type: 'init', seed: this.seed, ids: BLOCK, tables: BlockTables, sea: CONFIG.SEA_LEVEL,
+        type: 'init', seed: this.seed, ids: BLOCK, tables: BlockTables, sea: CONFIG.SEA_LEVEL, smooth: this.story,
         cfg: {
           chestChance: this.lootEnabled ? this.chestChance : 0, island: this.island,
           story: this.story ? Object.assign({ towerHeight: CONFIG.STORY.TOWER_HEIGHT }, CONFIG.STORY.SITES) : null,
@@ -283,7 +285,9 @@ class World {
   }
 
   _neighboursReady(ch) {
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    // the smooth ground of story mode reads two columns into the neighbours, diagonals included
+    const around = this.story ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (const [dx, dz] of around) {
       const n = this.chunks.get(World.key(ch.cx + dx, ch.cz + dz));
       if (!n || n.state !== ChunkState.READY) return false;
     }
@@ -299,7 +303,7 @@ class World {
       }
     }
     const seq = ch.meshSeq + 1;
-    const ok = this._dispatch({ type: 'mesh', blocks }, (res) => {
+    const ok = this._dispatch({ type: 'mesh', blocks, cx: ch.cx, cz: ch.cz }, (res) => {
       ch.meshing = false;
       if (ch.removed) return;
       res.seq = seq;
@@ -315,6 +319,8 @@ class World {
     this._disposeMeshes(ch);
     ch.meshOpaque = this._makeMesh(ch, res.opaque, this.materials.opaque, 0);
     ch.meshWater = this._makeMesh(ch, res.water, this.materials.water, 1);
+    ch.meshGround = res.ground ? this._makeGround(ch, res.ground, this.materials.ground) : null;
+    ch.meshProps = res.props ? this._makeProps(ch, res.props, this.materials.prop) : null;
     ch.meshState = MeshState.DONE;
   }
 
@@ -325,6 +331,7 @@ class World {
     g.setAttribute('uv', new THREE.BufferAttribute(m.uv, 2));
     g.setAttribute('tile', new THREE.BufferAttribute(m.tile, 1));
     g.setAttribute('shade', new THREE.BufferAttribute(m.shade, 1));
+    if (m.normal) g.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3));
     g.setIndex(new THREE.BufferAttribute(m.index, 1));
     // Chunk-local bounds so three.js can frustum-cull without scanning vertices.
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, 32, 8), 36);
@@ -333,12 +340,52 @@ class World {
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
     mesh.renderOrder = renderOrder;
+    if (material.story && renderOrder === 0) mesh.layers.enable(SHADOW_LAYER);        // casts sun shadows (render/shadow.js)
+    this.scene.add(mesh);
+    return mesh;
+  }
+
+  /** Story mode's smooth ground skin: position, normal and a colour blended from column to column. */
+  _makeGround(ch, m, material) {
+    if (!m.index.length) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(m.color, 3));
+    g.setIndex(new THREE.BufferAttribute(m.index, 1));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, 32, 8), 36);
+    const mesh = new THREE.Mesh(g, material);
+    mesh.position.set(ch.cx * CONFIG.CHUNK_SIZE, 0, ch.cz * CONFIG.CHUNK_SIZE);
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    mesh.renderOrder = 0;
+    mesh.layers.enable(SHADOW_LAYER);
+    this.scene.add(mesh);
+    return mesh;
+  }
+
+  /** Story mode's palms and reeds: position, normal, colour and how much each vertex sways in the wind. */
+  _makeProps(ch, m, material) {
+    if (!m.index.length) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(m.normal, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(m.color, 3));
+    g.setAttribute('sway', new THREE.BufferAttribute(m.sway, 1));
+    g.setIndex(new THREE.BufferAttribute(m.index, 1));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(8, 36, 8), 40);
+    const mesh = new THREE.Mesh(g, material);
+    mesh.position.set(ch.cx * CONFIG.CHUNK_SIZE, 0, ch.cz * CONFIG.CHUNK_SIZE);
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    mesh.renderOrder = 0;
+    mesh.layers.enable(SHADOW_LAYER);
     this.scene.add(mesh);
     return mesh;
   }
 
   _disposeMeshes(ch) {
-    for (const k of ['meshOpaque', 'meshWater']) {
+    for (const k of ['meshOpaque', 'meshWater', 'meshGround', 'meshProps']) {
       if (ch[k]) { this.scene.remove(ch[k]); ch[k].geometry.dispose(); ch[k] = null; }
     }
   }

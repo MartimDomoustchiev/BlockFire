@@ -132,7 +132,7 @@ const Loot = {
       return true;
     }
     const held = ch.heldStack();
-    if (held && ITEMS[held.id].kind === 'weapon') {
+    if (held && ITEMS[held.id].kind === 'weapon' && (!inv.slotFits || inv.slotFits(ch.selectedSlot, drop.stack))) {
       const dropped = game.addEntity(new ItemDrop(held, ch.pos.x, ch.pos.y + 0.5, ch.pos.z));
       dropped.pickupDelay = 1;
       dropped.persistent = true;

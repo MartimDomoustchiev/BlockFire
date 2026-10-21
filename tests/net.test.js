@@ -39,6 +39,9 @@ exports.tests = {
       return { chars: g.characters().length, remoteName: remote && remote.name, kit: remote && remote.inventory.count('stone') };
     });
     ctx.assert(a.chars === 2 && a.remoteName === 'Bob' && a.kit === 64, 'host sees Bob with a build kit: ' + JSON.stringify(a));
+    // the look travels with the player: the host knows Bob's look (the client sent it when it joined)
+    const look = await host.evaluate(() => { const r = __game.characters().find((c) => c.netRemote); return r && r.lookSpec ? r.lookSpec.hair : null; });
+    ctx.assert(look === 1, 'the host knows the joiner\'s look: ' + look);
     await client.waitForFunction(() => __game.characters().some((c) => c.netProxy), null, { timeout: 10000 });
     // host builds a clean stone pad in the sky and teleports Bob onto it (tests host->client teleports too);
     // first make sure the host's terrain there has finished generating (edits to missing chunks are dropped)

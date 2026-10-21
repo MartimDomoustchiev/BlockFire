@@ -148,6 +148,25 @@ const Icons = {
   },
 
   /** 256-entry array of [r,g,b] or null for a non-block item. */
+  /** A worn piece of the Order's gear: a hood, a cloak, bracers or boots, in leather and cloth tones. */
+  _gearPiece(slot, rar, set, shade) {
+    const cloth = [[58, 68, 88], [92, 60, 48], [70, 90, 72], [96, 84, 60]], leather = [[126, 84, 48], [104, 70, 42], [92, 62, 40]];
+    if (slot === 'head') {
+      for (let y = 3; y <= 12; y++) for (let x = 3; x <= 12; x++) { const d = Math.hypot(x - 7.5, y - 8); if (d < 5.4 && !(y > 7 && x > 5 && x < 10)) set(x, y, shade(cloth[rar - 1] || cloth[0], x < 5 ? 30 : 0)); }
+      for (let y = 8; y <= 12; y++) for (let x = 5; x <= 10; x++) set(x, y, [24, 18, 16]);
+    } else if (slot === 'cloak') {
+      for (let y = 3; y <= 13; y++) for (let x = 3; x <= 12; x++) set(x, y, shade(cloth[(rar - 1) % 4], (x === 5 || x === 9) ? 30 : (x === 7 ? -20 : 0)));
+      for (let x = 5; x <= 10; x++) set(x, 3, [40, 30, 26]);
+    } else if (slot === 'bracers') {
+      for (let y = 5; y <= 11; y++) for (let x = 3; x <= 12; x++) set(x, y, shade(leather[0], y === 5 || y === 11 ? -30 : (x % 4 === 0 ? 20 : 0)));
+      for (let x = 6; x <= 9; x++) set(x, 8, [206, 176, 80]);
+    } else {
+      for (let y = 3; y <= 9; y++) for (let x = 5; x <= 9; x++) set(x, y, shade(leather[1], x === 5 ? 30 : 0));
+      for (let y = 10; y <= 13; y++) for (let x = 3; x <= 11; x++) set(x, y, shade(leather[2], y === 13 ? -40 : 0));
+      for (let x = 3; x <= 11; x++) set(x, 14, [24, 18, 16]);
+    }
+  },
+
   _pixels(id) {
     const px = new Array(256).fill(null);
     const set = (x, y, c) => { if (x >= 0 && x < 16 && y >= 0 && y < 16) px[y * 16 + x] = c; };
@@ -201,6 +220,16 @@ const Icons = {
       this._arrow(set, 6); this._arrow(set, 10);
     } else if (id === 'smoke_bomb') {
       this._smokeBomb(set);
+    } else if (id === 'cloth_scrap') {
+      // a folded roll of cloth with a red selvedge
+      for (let y = 4; y <= 12; y++) for (let x = 3; x <= 12; x++) set(x, y, (x + y) % 5 === 0 ? [160, 60, 52] : shade([196, 186, 158], x === 3 ? -30 : 0));
+      for (let x = 3; x <= 12; x++) set(x, 4, [120, 110, 90]);
+    } else if (id === 'leather_strip') {
+      // two tanned strips crossed, stitched
+      for (let i = 0; i < 9; i++) { set(3 + i, 4 + i, shade([138, 92, 52], i % 3 === 0 ? 30 : 0)); set(11 - i, 4 + i, shade([124, 82, 46], i % 3 === 1 ? 30 : 0)); }
+      for (let i = 0; i < 4; i++) set(7 + i % 2, 6 + 2 * i, [226, 206, 150]);
+    } else if (it.kind === 'gear') {
+      this._gearPiece(it.gear.slot, it.gear.rarity, set, shade);
     } else if (it.kind === 'blade') {
       if (id === 'longsword') {
         // a straight double-edged sword: steel blade with a fuller, a broad crossguard, leather grip, brass pommel
@@ -228,6 +257,20 @@ const Icons = {
         for (let y = 5; y <= 12; y++) for (let x = 2; x <= 13; x++) set(x, y, [236, 228, 204]);
         for (let i = 0; i < 6; i++) { set(2 + i, 5 + i, [190, 180, 156]); set(13 - i, 5 + i, [190, 180, 156]); }
         for (const [x, y] of [[7, 10], [8, 10], [7, 11], [8, 11]]) set(x, y, [180, 30, 30]);
+      } else if (id === 'iron_crate') {
+        for (let y = 4; y <= 13; y++) for (let x = 2; x <= 13; x++) set(x, y, (x + y) % 5 === 0 ? [86, 58, 34] : [128, 92, 58]);
+        for (let x = 2; x <= 13; x++) { set(x, 6, [96, 102, 112]); set(x, 11, [96, 102, 112]); }
+        for (let y = 4; y <= 13; y++) { set(4, y, [96, 102, 112]); set(11, y, [96, 102, 112]); }
+      } else if (id === 'ledger_page') {
+        for (let y = 3; y <= 13; y++) for (let x = 4; x <= 11; x++) set(x, y, y === 3 && x % 2 ? [214, 204, 176] : [236, 228, 204]);
+        for (const y of [5, 7, 9, 11]) for (let x = 5; x <= (y === 11 ? 8 : 10); x++) set(x, y, [96, 76, 52]);
+      } else if (id === 'pell_key') {
+        for (const [x, y] of [[3, 6], [4, 5], [5, 5], [6, 6], [6, 7], [5, 8], [4, 8], [3, 7]]) set(x, y, [214, 176, 80]);
+        for (let x = 7; x <= 14; x++) set(x, 7, [214, 176, 80]);
+        for (const [x, y] of [[12, 8], [12, 9], [14, 8], [14, 9], [14, 10]]) set(x, y, [214, 176, 80]);
+      } else if (id === 'magistrate_seal') {
+        for (let y = 2; y <= 14; y++) for (let x = 2; x <= 14; x++) { const d = Math.hypot(x - 8, y - 8); if (d <= 5.6) set(x, y, d <= 3.6 && d >= 2.6 ? [196, 64, 64] : [150, 30, 36]); }
+        for (const [x, y] of [[6, 6], [7, 8], [8, 10], [9, 8], [10, 6]]) set(x, y, [226, 112, 100]);
       } else {
         for (let y = 5; y <= 12; y++) for (let x = 2; x <= 13; x++) set(x, y, y === 5 || y === 8 ? [150, 156, 166] : [104, 70, 42]);
         for (let y = 7; y <= 10; y++) { set(7, y, [214, 176, 80]); set(8, y, [214, 176, 80]); }

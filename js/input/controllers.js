@@ -66,8 +66,15 @@ class KeyboardMouseController {
     const inp = this.input, held = (c) => inp.down(c), pressed = (c) => this._keys.has(c);
     it.moveZ = (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0);
     it.moveX = (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0);
+    // touch stick: analog, and pushing it fully forward sprints (as the gamepad stick does)
+    const mv = inp.move;
+    if (mv) {
+      it.moveX = Math.max(-1, Math.min(1, it.moveX + mv.x));
+      it.moveZ = Math.max(-1, Math.min(1, it.moveZ + mv.y));
+    }
     it.jump = held('Space');
     it.sprint = held('ShiftLeft') || held('ShiftRight');
+    if (mv && mv.y > 0.7 && Math.hypot(mv.x, mv.y) > 0.95) it.sprint = true;
     it.crouch = held('KeyC');
     it.fire = inp.buttonDown(0);
     it.firePressed = this._buttons.has(0);

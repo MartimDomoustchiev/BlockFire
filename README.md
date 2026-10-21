@@ -16,12 +16,22 @@ Dock) to keep it. It remembers its window size and whether you left it in full s
 
 **In a browser:** double-click `index.html` (any modern browser with WebGL).
 
-Pick a mode, press **START**, then click into the game to capture the mouse. **Esc** (or **Start** on a
-gamepad) pauses.
+**The start screen is a lobby.** Your character stands on a stage in front of the Order's banners: change its name,
+skin, hair, clothes, accent colour, hood, cloak and face (or press RANDOMISE), drag the stage to turn it, pick a mode
+card and press START. Esc (or **Start** on a gamepad) pauses; the same screen then offers RESUME, NEW GAME and QUIT TO LOBBY.
+Click into the game to capture the mouse.
 
 **Full screen:** the **FULL SCREEN** button at the top of the menu, **Alt/Option + Enter** at any time, or
 the *Full screen* setting, which switches to full screen whenever a game starts. In the Mac app you can also
 use the green window button or **Control + Command + F**.
+
+**On Windows:** double-click `windows/BLOCKFIRE.bat`. It opens the game in its own window with Microsoft Edge (built into
+Windows 10 and 11) or Google Chrome, and falls back to your default browser. Nothing to install.
+
+**On a phone or tablet:** open the game on the same link as your friends (see *As an app from a website*) and pick the
+lobby's mode. Touch controls appear while you play: a stick, a drag to look, and big FIRE, AIM and JUMP buttons. Turn the
+phone sideways. Android Chrome goes full screen by itself; on an iPhone use *Share > Add to Home Screen* for a
+full-screen app.
 
 **As an app from a website:** put the folder on any website (GitHub Pages, itch.io, Netlify...) and it
 becomes an installable app that works offline after the first visit.
@@ -38,22 +48,42 @@ becomes an installable app that works offline after the first visit.
 | **Split-screen Duel** | Two players side by side: player 1 on keyboard + mouse, player 2 on a gamepad. Optional extra bots. Rules: last one standing, or respawn and first to 5 kills. |
 | **Free Build** | Infinite world, no enemies, no storm, building materials and blocks never run out, flying allowed. |
 | **Explore** | Infinite world sandbox: mine, craft, smelt, loot chests, fight training dummies (debug), drive. Respawn on death. |
-| **Story** | A stealth campaign on Kestrel Isle: climb, hide, take down the Magistrate's enforcers. Solo or co-op online. Saves progress. |
+| **Story** | A stealth campaign on Kestrel Isle: eighteen chapters, challenges, twelve letters and the Order's gear. Solo or co-op online. Saves progress. |
 
 ## Story mode
 
 Kestrel Isle is ruled by Magistrate Corvin Vale, and his Tollmen squeeze its villages dry. You are the newest member of
 a hidden order that fights back from the shadows. The island is generated from a fixed seed: four villages, three
 enforcer camps, Vale's walled keep on the central hill and the Order's ruined hideout, all joined by roads.
+The land is desert: sand dunes, green fields by the water, palms, sandstone and mudbrick, with the sun casting
+soft shadows and the sky turning at dusk. The ground is smooth, the buildings are blocks. Other modes keep their blocky look.
 
-- **Campaign:** five chapters, each started by talking to Old Wren at the hideout.
+- **Campaign:** eighteen chapters, each started by talking to Old Wren at the hideout. Press **J** for the journal:
+  chapters, challenges and the letters you have read.
   1. *The Quiet Order:* climbing, viewpoints, the leap of faith, your first takedown.
   2. *The Ledger:* tail the tax collector without being seen, then steal his ledger from a camp. He glances back
      now and then, and a meter over his head fills while he can see you. Walls, trees, hay and crowds hide you.
   3. *The Smith of Ironwood:* free Ida Marrow from her cage and escort her to safety. She then opens a shop at the
      hideout.
-  4. *The Captain:* assassinate Captain Brask Hollen as he inspects a camp with two bodyguards, then lose the pursuit.
-  5. *The Magistrate:* get inside Vale Keep and end it. Look for the skylight in the hall roof.
+  4. *Iron for the Forge:* three crates of confiscated iron lie inside village houses. Haul them to Ida and light her forge.
+  5. *Toll Roads:* take a toll ticket from each of the three camps' strongboxes (press E) and return them to Wren.
+  6. *The Informant:* a bookkeeper in Mossford will talk, but only where nobody sees: hide in the hay and overhear two
+     Tollmen without being noticed.
+  7. *The Granary:* spoil the grain sacks in Harrowdale without raising the alarm.
+  8. *The Prisoners:* pick the locks of the three camp cages. Each freed villager walks home along the roads, and any
+     guard who sees them will cut them down.
+  9. *The Captain:* assassinate Captain Brask Hollen as he inspects a camp with two bodyguards, then lose the pursuit.
+  10. *The Pickpocket:* sneak up behind Quartermaster Pell in Saltreach and lift the key from his belt.
+  11. *Vale's Answer:* three columns of Tollmen march on Brindle. Break them on the road, one at a time.
+  12. *Bells of Ironwood:* climb the bell towers of three villages and ring them (E at the rope).
+  13. *The Missing Pages:* a paper chase through bushes outside a camp and behind village houses, for the pages Fitch
+      tore out of the ledger.
+  14. *Night Watch:* light the three signal braziers on the keep's wall walk, then get clear.
+  15. *Marksmen of the Keep:* take down the three musketeers on the walls before anyone goes in.
+  16. *Rally the Villages:* four elders, four favours: a hidden elder, a beacon on a tower, a sergeant who has to go.
+  17. *The Seal:* slip into Vale's hall and take the Magistrate's seal from his lockbox (faster with Pell's key). The
+      forged order that follows calls the keep's wall and courtyard patrols away for good.
+  18. *The Magistrate:* get inside Vale Keep and end it. Look for the skylight in the hall roof.
 
   Failing an objective (being spotted while tailing, losing someone you escort, dying) means **desynchronization**:
   you restart from the last checkpoint.
@@ -83,7 +113,13 @@ enforcer camps, Vale's walled keep on the central hill and the Order's ruined hi
   damage. Block just as a sabre comes down to **parry**: the guard staggers and one cut finishes him. Guards in a fight
   sometimes turn your cuts aside. Anyone who doesn't see it coming falls to a single cut, but unlike the wrist blade
   it isn't silent to anyone watching.
-- **Gear:**
+- **Gear (Tab):** the Order does not carry a block inventory. Five loadout slots (keys 1-5) hold your hidden blade, your
+  sword, a ranged weapon, a throwable and a remedy. Outfit pieces (hood, cloak, bracers, boots) give attack, defense and
+  stealth; wear them, buy them from Ida, upgrade them at her forge with silver and materials, or sell what you do not need.
+  Gear taken from challenges is not for sale.
+- **Challenges:** 37 optional goals across the campaign (silent takedowns, leaps, viewpoints, the twelve letters, unseen
+  chapters, quiet bells, the informant, Pell's key, forging gear and more). They pay silver, and some pay a piece of gear.
+- **Gear, arms and weapons:**
   - A hunting bow (from chapter I). Hold the left mouse button to draw and release to shoot. A full draw flies
     straight and kills; a quick shot is weaker. Arrows that hit the ground or a wall, or kill someone, can be picked
     up again by walking over them.
@@ -124,14 +160,26 @@ Needs an internet connection on every device. Up to 8 players.
 
 Everyone needs **the same version** of the game files. Either send your friends the `blockfire` folder (zip
 it), or upload it to any free static host (GitHub Pages, itch.io as an HTML game, Netlify) and share the link.
-That also lets phones and tablets open it, but there are no touch controls yet, so they need a keyboard and
-mouse or a gamepad.
+That also lets phones and tablets open it: they have touch controls (see *Touch* below).
 
 How it works: the host's browser runs the game. Friends connect straight to it (WebRTC) after a free public
 matchmaking server ([PeerJS](https://peerjs.com)) introduces them using the room code. No game data goes
 through that server. If a friend can't connect, a strict network (some school or work Wi-Fi) is usually
 blocking peer-to-peer traffic; try a phone hotspot. If the host leaves, the game ends for everyone.
 Split-screen Duel is local only; hosting with it selected starts Solo vs Bots.
+
+## Touch (phones and tablets)
+
+Touch controls appear while you play on a touch screen (you can force them on a desktop with `?touch=1`):
+
+- **Stick** (bottom left): move. Push it fully forward to sprint.
+- **Drag anywhere else:** look. Settings > Touch look sets how fast.
+- **FIRE** (big, bottom right): hold to shoot, mine, draw the bow or strike. **AIM**: aim down sights, block with the sword.
+- **JUMP** (climb: push against a wall), **RELOAD**, **USE** (E), **CROUCH** (sneak), **NEXT** (next item).
+- **GEAR**, **MAP** and **JOURNAL** in story, **FLY** in explore and free build, **BUILD** in free build, **INV** elsewhere (top left). **MENU** (top right) pauses.
+
+Phones in portrait ask you to turn sideways. Graphics: on phones the game starts on *Medium*, and Settings > Graphics
+(Low, Medium, High, Ultra) and *Auto resolution* keep the frame rate up.
 
 ## Controls
 
@@ -208,6 +256,14 @@ Every gameplay number is in `js/constants.js`: weapon stats and rarity multiplie
 tables, build costs and HP, vehicle handling, storm phases, bot difficulty, crafting yields, player movement,
 world generation parameters and more.
 
+## Graphics
+
+Settings > Graphics picks a preset (Low, Medium, High or Ultra: render distance, sharpness, how far story people are
+drawn). The default, *Auto*, picks Ultra on a desktop graphics card (Radeon RX, GeForce RTX and the like), Medium on
+phones and High elsewhere. Ultra draws the scene at 1.5x with 4x anti-aliasing and filters it down sharp, adds bloom,
+sun rays and a film grade, a wider and finer shadow map, cumulus clouds and 12 chunks of view.
+*Auto resolution* sharpens or softens the picture to keep the frame rate up. Auto distance is separate.
+
 ## Project layout
 
 ```
@@ -224,17 +280,18 @@ js/build/               fast-building pieces, edit mode, ramp rush, box up
 js/entities/            Entity, Character, interaction, item drops, projectiles, vehicles + fuel barrels
 js/ai/                  bot brain (state machine, aiming, navigation, driving)
 js/match/               storm, match flow (spawns, placements, results)
-js/input/               keyboard/mouse, controllers -> Intents, gamepad
+js/input/               keyboard/mouse, controllers -> Intents, gamepad, touch controls (touch.js)
 js/render/              texture atlas, shaders, sky, icons, overlays, models, viewmodel, effects, build ghost, vehicles
-js/ui/                  menu, per-player HUDs (hotbar, combat, build, vehicle, match), inventory screens, PlayerView
+js/ui/                  start screen and lobby stage (menu, lobby-stage), per-player HUDs, inventory and gear screens, PlayerView
 js/audio/               Web Audio synthesiser
 js/net/                 online play: transport (PeerJS / test bridge), wire protocol, NetHost, NetClient
-js/story/               story mode: plan (sites), director, missions + contracts, NPC brains, stealth, blades + swords, smoke, posters
+js/story/               story mode: plan (sites), director, missions (+ missions-extra, missions-more: eighteen chapters) + contracts, challenges and letters, gear, NPC brains, stealth, blades + swords, smoke, posters
 js/worker/sites.js      story mode: plans villages, camps, keep, hideout and roads from the seed and builds every block
 vendor/peerjs.min.js    local copy of PeerJS 1.5.4 (WebRTC + room-code matchmaking)
 js/ui/app-shell.js      full screen, Mac app bridge, installable web app (manifest + offline cache)
 js/main.js              boot, modes, split-screen rendering, online host/join, frame loop
 mac/                    the Mac app: BlockfireApp.swift (native window), build.sh, the icon (make-icons.js)
+windows/                BLOCKFIRE.bat: opens the game in its own Edge or Chrome window
 BLOCKFIRE.app           the built Mac app (made by mac/build.sh; not committed, see .gitignore)
 icons/, manifest.webmanifest, sw.js   installable web app: icons, manifest, offline cache
 tests/                  headless Chromium test suite (dev only)

@@ -19,10 +19,19 @@ class StoryScreens {
     this.kind = null;
     this.data = null;
     this.fog = null; this.fogN = -1;
+    this.gear = null;                        // the Order's gear screen (ui/gear-screen.js), built when first used
+    // every story screen has a CLOSE button (touch screens have no Escape key)
+    this.openedAt = 0;
+    this.root.addEventListener('click', (e) => {
+      // a tap that opened a screen also makes a click where the finger lifts: that one must not close it again
+      if (performance.now() - this.openedAt < 350) return;
+      if (e.target && e.target.classList && e.target.classList.contains('sClose')) this.close(true);
+    });
     window.addEventListener('keydown', (e) => {
       if (!this.isOpen) return;
-      if (e.code === 'Escape' || e.code === 'KeyE' || (e.code === 'KeyM' && this.kind === 'map') || e.code === 'Tab') {
+      if (e.code === 'Escape' || e.code === 'KeyE' || (e.code === 'KeyM' && this.kind === 'map') || (e.code === 'KeyJ' && this.kind === 'journal') || e.code === 'Tab') {
         e.preventDefault();
+        e.stopImmediatePropagation();          // the key that closes a screen must not open one again
         this.close(e.code !== 'Escape');
       }
     });
@@ -33,6 +42,7 @@ class StoryScreens {
     if (!g || !g.story) return;
     this.kind = kind; this.data = data || {};
     this.isOpen = true;
+    this.openedAt = performance.now();
     if (g.player && g.player.controller) { g.player.controller.enabled = false; if (g.player.controller.flush) g.player.controller.flush(); }
     this.input.unlock();
     this.root.className = '';
@@ -57,13 +67,14 @@ class StoryScreens {
     if (!g || !g.story || !g.player || !g.player.alive) { this.close(false); return; }
     if (this.kind === 'map') this.drawMap();
     else if (this.kind === 'shop' && this.shownSilver !== g.story.silver) this.render();
+    else if (this.kind === 'gear') this.gear.refresh(g.player, g.story, false);
   }
 
   render() {
     const g = this.getGame(), st = g.story;
     const K = this.kind;
     if (K === 'map') {
-      this.root.innerHTML = '<div class="panel storyMap"><h2>KESTREL ISLE</h2><canvas width="640" height="640"></canvas>' +
+      this.root.innerHTML = '<div class="panel storyMap"><button class="sClose alt">CLOSE</button><h2>KESTREL ISLE</h2><canvas width="640" height="640"></canvas>' +
         '<p class="hint">Gold eyes are synchronized viewpoints: click one to travel there. Brown boxes are supplies (arrows, smoke, rounds): the chest in the hideout and the enemy arms crates. <kbd>M</kbd> close</p></div>';
       this.canvas = this.root.querySelector('canvas');
       this.canvas.addEventListener('mousedown', (e) => this.mapClick(e));
@@ -71,7 +82,7 @@ class StoryScreens {
     } else if (K === 'board') {
       const offers = this.data.offers || [];
       const busy = this.data.busy;
-      let html = '<div class="panel storyBoard"><h2>NOTICE BOARD</h2>';
+      let html = '<div class="panel storyBoard"><button class="sClose alt">CLOSE</button><h2>NOTICE BOARD</h2>';
       if (busy) html += '<p class="hint">You are on a job: ' + esc(busy) + '</p>';
       offers.forEach((o, i) => {
         html += '<div class="offer"><div><b>' + esc(o.title) + '</b><span>' + esc(o.desc) + '</span></div>' +
@@ -83,9 +94,14 @@ class StoryScreens {
       this.root.querySelectorAll('.offer button').forEach((b) => b.addEventListener('click', () => { this.act({ a: 'accept', site: this.data.site, i: +b.dataset.i }); this.close(true); }));
       const ab = this.root.querySelector('.abandon');
       if (ab) ab.addEventListener('click', () => { this.act({ a: 'abandon' }); this.close(true); });
+    } else if (K === 'journal') {
+      this.root.innerHTML = this.journalHTML(st);
+    } else if (K === 'gear') {
+      if (!this.gear) this.gear = new GearView(this.root, (op, i, j) => this.act({ a: 'gear', g: op, i, j }));
+      this.gear.open(g.player, st);
     } else if (K === 'shop') {
       this.shownSilver = st.silver;
-      let html = '<div class="panel storyShop"><h2>IDA\'S FORGE</h2><p class="hint">The Order\'s purse: <b>' + st.silver + ' silver</b></p>';
+      let html = '<div class="panel storyShop"><button class="sClose alt">CLOSE</button><h2>IDA\'S FORGE</h2><p class="hint">The Order\'s purse: <b>' + st.silver + ' silver</b></p>';
       for (const it of CONFIG.STORY.SHOP) {
         html += '<div class="offer"><div><b>' + esc(it.name) + '</b></div><button data-id="' + it.id + '"' + (st.silver < it.price ? ' disabled' : '') + '>' + it.price + ' silver</button></div>';
       }
@@ -93,6 +109,29 @@ class StoryScreens {
       this.root.innerHTML = html;
       this.root.querySelectorAll('.offer button').forEach((b) => b.addEventListener('click', () => { this.act({ a: 'buy', id: b.dataset.id }); setTimeout(() => this.isOpen && this.render(), 150); }));
     }
+  }
+
+  // ---------------------------------------------------------------- the journal
+  /** Chapters, challenges, letters and the Order's tally: what the campaign has left to do. */
+  journalHTML(st) {
+    const done = (c) => c ? ' class="done"' : '';
+    const chapters = STORY_CHAPTERS.map((c, i) => {
+      const mark = i < st.chapter ? '&#10003;' : i === st.chapter && !st.finished ? '&#9654;' : '&middot;';
+      return '<li' + done(i < st.chapter) + '><i>' + mark + '</i> <b>' + ROMAN[i] + '. ' + esc(c.title) + '</b></li>';
+    }).join('');
+    const challenges = STORY_CHALLENGES.map((c) => {
+      const ok = st.challengesDone.has(c.id), r = c.reward;
+      const pays = (r.silver ? r.silver + ' silver' : '') + (r.gear ? (r.silver ? ', ' : '') + r.gear.map((id) => CONFIG.STORY.GEAR.PIECES[id].name).join(', ') : '');
+      return '<li' + done(ok) + '><i>' + (ok ? '&#10003;' : '&middot;') + '</i> <b>' + esc(c.title) + '</b><span>' + esc(c.text) + (pays ? ' <em>' + esc(pays) + '</em>' : '') + '</span></li>';
+    }).join('');
+    const letters = ORDER_LETTERS.map((L, i) => '<li' + done(st.letters.has(i)) + '>' + (st.letters.has(i) ? esc(L.text) : '<span class="unread">An unread letter. It lies somewhere on the island.</span>') + '</li>').join('');
+    const tally = 'silver ' + st.silver + '  &middot;  kills ' + (st.stats.kills | 0) + '  &middot;  silent ' + (st.stats.silent | 0) + '  &middot;  letters ' + st.letters.size + '/' + ORDER_LETTERS.length +
+      '  &middot;  challenges ' + st.challengesDone.size + '/' + STORY_CHALLENGES.length + '  &middot;  contracts ' + (st.stats.contracts | 0);
+    return '<div class="panel journal"><button class="sClose alt">CLOSE</button><h2>THE ORDER\'S JOURNAL</h2><p class="hint tally">' + tally + '</p>' +
+      '<div class="jCols"><div><h3>CHAPTERS</h3><ul class="jList">' + chapters + '</ul></div>' +
+      '<div><h3>CHALLENGES</h3><ul class="jList">' + challenges + '</ul></div>' +
+      '<div><h3>LETTERS</h3><ul class="jList">' + letters + '</ul></div></div>' +
+      '<p class="hint"><kbd>J</kbd> close</p></div>';
   }
 
   // ---------------------------------------------------------------- the map

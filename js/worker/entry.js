@@ -5,7 +5,10 @@ WorkerBundle.add(function entryPart() {
     const out = [];
     for (const layer of [res.opaque, res.water]) {
       out.push(layer.pos.buffer, layer.uv.buffer, layer.tile.buffer, layer.shade.buffer, layer.index.buffer);
+      if (layer.normal) out.push(layer.normal.buffer);
     }
+    if (res.ground) out.push(res.ground.pos.buffer, res.ground.normal.buffer, res.ground.color.buffer, res.ground.index.buffer);
+    if (res.props) out.push(res.props.pos.buffer, res.props.normal.buffer, res.props.color.buffer, res.props.sway.buffer, res.props.index.buffer);
     return out;
   }
   self.onmessage = function (e) {
@@ -14,7 +17,7 @@ WorkerBundle.add(function entryPart() {
       case 'init':
         BEDROCK = m.ids.BEDROCK;
         setupTerrain(m.ids, m.sea, m.seed, m.cfg);
-        setupMesher(m.tables);
+        setupMesher(m.tables, m.smooth);
         break;
       case 'gen': {
         const data = generateChunk(m.cx, m.cz);
@@ -22,7 +25,7 @@ WorkerBundle.add(function entryPart() {
         break;
       }
       case 'mesh': {
-        const res = meshChunk(m.blocks, BEDROCK);
+        const res = meshChunk(m.blocks, BEDROCK, m.cx, m.cz);
         res.id = m.id;
         self.postMessage(res, collectBuffers(res));
         break;

@@ -1,0 +1,18 @@
+{
+  "appId": "local.blockfire.game",
+  "appName": "BLOCKFIRE",
+  "webDir": "www",
+  "backgroundColor": "#14181f",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true
+  },
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "backgroundColor": "#14181f"
+  }
+}

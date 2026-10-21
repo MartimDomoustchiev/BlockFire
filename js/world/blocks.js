@@ -13,6 +13,7 @@ const BLOCK = Object.freeze({
   // story mode: villages, camps and the keep
   HAY: 22, BUSH: 23, PATH: 24, COBBLE: 25, ROOF: 26, PLASTER: 27, TIMBER: 28, CLOTH: 29, CANVAS: 30, BARS: 31, BOARD: 32,
   ARMS: 33,
+  PALM: 34,        // story mode: the solid core of a palm trunk (drawn as a real palm by the smooth mesher, never as a cube)
 });
 
 // Index of each texture inside the atlas (see render/textures.js).
@@ -85,6 +86,7 @@ defBlock(BLOCK.CANVAS, 'Canvas', { tiles: TILE.CANVAS, hardness: 0.4 });
 defBlock(BLOCK.BARS, 'Iron Bars', { tiles: TILE.BARS, opaque: false, cutout: true, hardness: 4, tool: 'pickaxe', tier: 2 });
 defBlock(BLOCK.BOARD, 'Notice Board', { tiles: { top: TILE.PLANKS, bottom: TILE.PLANKS, side: TILE.BOARD }, hardness: -1 });
 // arms crate: restock arrows, smoke and rounds (E) - in the enforcers' camps and the keep, and the Order's supply chest at the hideout
+defBlock(BLOCK.PALM, 'Palm Trunk', { hardness: -1 });          // no tiles: the voxel mesher skips it
 defBlock(BLOCK.ARMS, 'Arms Crate', { tiles: { top: TILE.ARMS_TOP, bottom: TILE.PLANKS, side: TILE.ARMS_SIDE }, hardness: -1 });
 
 /*
@@ -99,7 +101,18 @@ const BlockTables = (function () {
     liquid: new Uint8Array(N), cutout: new Uint8Array(N),
     faceTiles: new Int16Array(N * 6).fill(-1),
     waterTile: TILE.WATER,
+    // story mode's smooth ground (worker/mesher.js): 1 = natural ground, drawn as one skin; 2 = a prop that stands on it, looked through
+    ground: new Uint8Array(N),
+    groundColor: new Float32Array(N * 3),
+    prop: new Uint8Array(N),            // story mode: blocks the smooth mesher draws as real geometry: 1 = palm trunk, 2 = reeds (a bush)
   };
+  const GROUND_COLORS = {
+    [BLOCK.GRASS]: [0.46, 0.55, 0.22], [BLOCK.DIRT]: [0.5, 0.37, 0.25], [BLOCK.STONE]: [0.66, 0.6, 0.52], [BLOCK.SAND]: [0.88, 0.73, 0.47],
+    [BLOCK.SNOW]: [0.9, 0.92, 0.95], [BLOCK.PATH]: [0.68, 0.57, 0.4],
+  };
+  for (const id of Object.keys(GROUND_COLORS)) { t.ground[id] = 1; t.groundColor.set(GROUND_COLORS[id], id * 3); }
+  for (const id of [BLOCK.WOOD, BLOCK.LEAVES, BLOCK.CACTUS, BLOCK.BUSH, BLOCK.HAY, BLOCK.PALM]) t.ground[id] = 2;
+  t.prop[BLOCK.PALM] = 1; t.prop[BLOCK.BUSH] = 2;
   BLOCK_DEFS.forEach((d, id) => {
     if (!d) return;
     t.opaque[id] = d.opaque ? 1 : 0;

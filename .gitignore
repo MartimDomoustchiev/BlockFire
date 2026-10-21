@@ -1,12 +1,40 @@
-# Built by ./mac/build.sh from the files here - rebuild it, don't commit it
+# Built by ./mac/build.sh from the files here - rebuild it, don't commit it (and Finder's numbered copies of it)
 BLOCKFIRE.app/
+BLOCKFIRE *.app/
 
 # Screenshots written by the tests (node tests/run.js)
 tests/output/
 
-# macOS Finder metadata
+# OS and editor clutter
 .DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
 
 # Tooling
 node_modules/
 *.log
+.env
+
+# Linked in post
+linkedin-post
+
+# Android and iPhone apps (native/): the web files are copied in by `npm run sync`, the rest is build output
+native/node_modules/
+native/www/
+native/android/.gradle/
+native/android/build/
+native/android/app/build/
+native/android/local.properties
+native/ios/App/build/
+native/ios/App/Pods/
+native/ios/App/App/public/
+**/xcuserdata/
+native/*.apk
+native/*.ipa
+# the project template's example tests (com.getcapacitor.myapp); the game's tests live in tests/
+native/android/app/src/test/
+native/android/app/src/androidTest/

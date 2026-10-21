@@ -77,6 +77,7 @@ class NetHost {
         if (m.v !== NET.VERSION) { this.t.send(id, { k: 'deny', reason: 'Your copy of the game is a different version from the host\'s. Get the same game files as the host.' }); return; }
         if (this.playerCount() >= NET.MAX_PLAYERS) { this.t.send(id, { k: 'deny', reason: 'The room is full.' }); return; }
         peer.name = String(m.name || 'Player').replace(/[^\w .-]/g, '').slice(0, 16) || 'Player';
+        peer.look = NetProto.unlook(m.look);
         if (this.game) this._spawn(peer);
         if (this.hooks.peersChanged) this.hooks.peersChanged();
         break;
@@ -96,7 +97,7 @@ class NetHost {
   /** Creates the joiner's character and sends them everything they need to build the world. */
   _spawn(peer) {
     const g = this.game;
-    const ch = new Character({ name: peer.name, controller: new RemoteController(), isLocal: false });
+    const ch = new Character({ name: peer.name, controller: new RemoteController(), isLocal: false, look: 'player', lookSpec: peer.look });
     ch.netRemote = true;
     ch.isRemotePlayer = true;
     g.addEntity(ch);
@@ -137,7 +138,7 @@ class NetHost {
     const ch = peer.ch;
     if (!ch || !ch.alive || !this.game) return;
     if (m.op === 'open') {
-      if (m.kind === 'inventory' && !ch.vehicle) { peer.session = new ScreenSession(this.game, ch, 'inventory'); peer.scVer = -2; }
+      if (m.kind === 'inventory' && !ch.vehicle && !this.game.rules.story) { peer.session = new ScreenSession(this.game, ch, 'inventory'); peer.scVer = -2; }
     } else if (!peer.session) {
       return;
     } else if (m.op === 'click' && m.ref) {

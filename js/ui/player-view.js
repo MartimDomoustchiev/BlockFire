@@ -89,6 +89,7 @@ class PlayerView {
     this.combat.attach(game, ch);
     this.viewmodel.attach(game, ch);
     this.storyHud.attach(game, ch);
+    this.hotbar.setLoadout(game.rules.story ? CONFIG.STORY.GEAR.LOADOUT.map((l) => l.short) : null);
   }
 
   detach() {
@@ -187,10 +188,14 @@ class PlayerView {
   }
 
   /** Draws this view into its rectangle (world, then the viewmodel on top). */
-  render(renderer, scene) {
+  /** Draws this view into its rectangle: on the canvas, or into the Ultra preset's scene image when `post` is given. */
+  render(renderer, scene, post) {
     const r = this.rect;
-    renderer.setViewport(r.x, r.y, r.w, r.h);
-    renderer.setScissor(r.x, r.y, r.w, r.h);
+    if (post) post.bindView(r);
+    else {
+      renderer.setViewport(r.x, r.y, r.w, r.h);
+      renderer.setScissor(r.x, r.y, r.w, r.h);
+    }
     renderer.render(scene, this.camera);
     if (this.character && !this.spectate && !this.tp) this.viewmodel.render(renderer);
   }

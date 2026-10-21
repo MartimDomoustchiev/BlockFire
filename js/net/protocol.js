@@ -17,7 +17,7 @@
  * (per-client delta) and only near the receiving player.
  * ============================================================ */
 const NET = {
-  VERSION: 5,                  // bump whenever the wire format or world generation changes (2: story mode, 3: story fixes, 4: arms crates, 5: bow, sword, hideout chest)
+  VERSION: 9,                  // bump whenever the wire format or world generation changes (2: story mode, 3: story fixes, 4: arms crates, 5: bow, sword, hideout chest, 6: looks, 7: journal state, eighteen chapters, 8: the desert story land: palms, sand, smooth ground, 9: brick houses, shadows and grade)
   SNAP_HZ: 20,
   INPUT_HZ: 30,
   INTERP: 0.1,                 // seconds clients render others behind the newest snapshot
@@ -44,6 +44,9 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const v3 = (v) => [r2(v.x), r2(v.y), r2(v.z)];
 
 const NetProto = {
+  /** A player look as a short array of palette indices (see PLAYER_LOOK) and back. */
+  look(spec) { const s = PLAYER_LOOK.normalize(spec); return [s.skin, s.style, s.hair, s.top, s.bottom, s.accent, s.facial, s.hood ? 1 : 0, s.cloak ? 1 : 0]; },
+  unlook(a) { return Array.isArray(a) ? PLAYER_LOOK.normalize({ skin: a[0], style: a[1], hair: a[2], top: a[3], bottom: a[4], accent: a[5], facial: a[6], hood: a[7] === 1, cloak: a[8] === 1 }) : PLAYER_LOOK.normalize(null); },
   stack(s) { return s ? (s.data ? [s.id, s.count, s.data] : [s.id, s.count]) : 0; },
   unstack(a) { if (!a) return null; const s = { id: a[0], count: a[1] }; if (a[2]) s.data = Object.assign({}, a[2]); return s; },
 
@@ -58,7 +61,7 @@ const NetProto = {
           g: e.gliding ? 1 : 0, gr: e.onGround ? 1 : 0, w: e.inWater ? 1 : 0, vs: e.vehicle ? e.vehicle.id : 0,
           si: e.seatIndex, m: e.mining ? r2(e.mining.progress) : 0, bot: e.isBot ? 1 : 0,
           // story mode: model style and pose
-          lk: e.look || 0, cr: e.sneaking ? 1 : 0, cl: e.climbing ? 1 : 0, lp: e.leap ? 1 : 0, cp: e.corpse ? 1 : 0,
+          lk: e.look || 0, ls: e.lookSpec ? NetProto.look(e.lookSpec) : 0, cr: e.sneaking ? 1 : 0, cl: e.climbing ? 1 : 0, lp: e.leap ? 1 : 0, cp: e.corpse ? 1 : 0,
           nr: e.npcRole || 0, hu: e.isHuman ? 1 : 0, su: e.suspicion ? r2(e.suspicion) : 0,
         };
       }
@@ -145,7 +148,7 @@ class RemoteController {
   getIntent(game, ch) {
     const s = this.state;
     // the player moves itself: take its reported position unless we teleported it and it hasn't caught up
-    if (s && s.tpa === ch.netTpSeq && ch.alive && !ch.vehicle && Number.isFinite(s.p[0])) {
+    if (s && s.tpa === ch.netTpSeq && ch.alive && !ch.vehicle && s.p && s.v && Number.isFinite(s.p[0]) && Number.isFinite(s.v[0])) {
       ch.pos.set(s.p[0], s.p[1], s.p[2]);
       ch.vel.set(s.v[0], s.v[1], s.v[2]);
       ch.onGround = !!s.gr;

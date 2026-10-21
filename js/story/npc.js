@@ -215,7 +215,7 @@ class GuardController extends NpcController {
       const engaged = this.state === 'combat' && this.target === p;
       if (seen) {
         this.lastSeenAt.set(p.id, { pos: p.pos.clone(), at: game.time });
-        const rate = engaged ? 10 : A.RATE * Math.max(0.15, 1 - d / range) * Stealth.suspicion(game, ch, p) * (alarm ? 1.5 : 1);
+        const rate = engaged ? 10 : A.RATE * Math.max(0.15, 1 - d / range) * Stealth.suspicion(game, ch, p) * (alarm ? 1.5 : 1) * (p.isHuman ? Gear.stealthMult(p) : 1);
         const cap = engaged ? 1 : Stealth.awarenessCap(game, p);
         lv = rate > 0 ? Math.min(cap, lv + rate * dt) : Math.max(0, lv - A.DECAY * dt);
         if (cap < 1 && lv >= A.SUSPICIOUS && p.climbing && this.state !== 'combat') Stealth.bark(game, ch, 'climb');

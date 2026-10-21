@@ -62,6 +62,7 @@ class Character extends Entity {
     this.leap = null;                   // leap of faith: the hay pile we steer into
     this.fallTop = null;                // highest point of the current fall (fall damage)
     this.look = opts.look || null;      // model style: null (ranger), 'order', 'villager', 'guard'...
+    this.lookSpec = opts.lookSpec || null;   // a player's own look (js/render/looks.js), when look is 'player' or 'order'
     this.inventory = new Inventory(CONFIG.INVENTORY_SLOTS);
     this.selectedSlot = 0;
     this.target = null;                 // block raycast result this tick
@@ -128,8 +129,11 @@ class Character extends Entity {
     if (at) this.teleport(at.x, at.y, at.z);
   }
 
+  /** Story mode has a five-slot loadout instead of the nine-slot hotbar. */
+  hotbarSize() { return this.game && this.game.rules.story ? Gear.LOADOUT : CONFIG.HOTBAR_SLOTS; }
+
   selectSlot(i) {
-    const n = CONFIG.HOTBAR_SLOTS;
+    const n = this.hotbarSize();
     i = ((i % n) + n) % n;
     if (i !== this.selectedSlot) {
       this.selectedSlot = i;
@@ -159,7 +163,7 @@ class Character extends Entity {
     }
     if (this.vehicle) { if (!this.netPredicted) this._seated(dt, it, game); return; }
     if (it.toggleFly && game.rules.allowFly && !this.netRemote) { this.flying = !this.flying; this.vel.y = 0; }
-    if (it.slot >= 0) this.selectSlot(it.slot);
+    if (it.slot >= 0 && it.slot < this.hotbarSize()) this.selectSlot(it.slot);
     else if (it.slotDelta && !this.build.active) this.selectSlot(this.selectedSlot + it.slotDelta);
     this.sneaking = !!(game.rules.sneak && it.crouch && !this.inWater && !this.climbing && !this.flying);
 

@@ -253,7 +253,8 @@ WorkerBundle.add(function sitesPart() {
   function house(T, x0, z0, w, d, F, door, style, P) {
     const { put, fill, ring } = T;
     const x1 = x0 + w - 1, z1 = z0 + d - 1;
-    const wall = style === 1 ? ID.PLANKS : style === 2 ? ID.BRICK : ID.PLASTER;
+    // walls of sun-dried brick or limewashed plaster (no planks: this is a desert village); style 1 is the brick, the others plaster
+    const wall = style === 1 ? ID.BRICK : ID.PLASTER;
     fill(x0 - 1, F + 1, z0 - 1, x1 + 1, F + 12, z1 + 1, ID.AIR);
     fill(x0, F, z0, x1, F, z1, ID.PLANKS);
     ring(x0, z0, x1, z1, F + 1, F + 4, wall);
@@ -270,19 +271,10 @@ WorkerBundle.add(function sitesPart() {
     const ox = door === 1 ? 1 : door === 3 ? -1 : 0, oz = door === 2 ? 1 : door === 0 ? -1 : 0;
     P.doors.push(pt(dx + ox, F + 1, dz + oz));
     P.inside.push(pt(Math.floor((x0 + x1) / 2), F + 1, Math.floor((z0 + z1) / 2)));
-    // stepped gable roof along the longer side, flush with the walls (no eaves to get stuck under when climbing)
-    const alongX = w >= d;
-    const a0 = alongX ? z0 : x0, a1 = alongX ? z1 : x1;
-    for (let k = 0; a0 + k <= a1 - k; k++) {
-      const y = F + 5 + k, lo = a0 + k, hi = a1 - k;
-      if (alongX) {
-        fill(x0, y, lo, x1, y, lo, ID.ROOF); fill(x0, y, hi, x1, y, hi, ID.ROOF);
-        if (hi - lo > 1) { fill(x0, y, lo + 1, x0, y, hi - 1, wall); fill(x1, y, lo + 1, x1, y, hi - 1, wall); }
-      } else {
-        fill(lo, y, z0, lo, y, z1, ID.ROOF); fill(hi, y, z0, hi, y, z1, ID.ROOF);
-        if (hi - lo > 1) { fill(lo + 1, y, z0, hi - 1, y, z0, wall); fill(lo + 1, y, z1, hi - 1, y, z1, wall); }
-      }
-    }
+    // flat roof with a low parapet: mudbrick houses have walkable roofs, and the rooftops connect the village
+    fill(x0, F + 5, z0, x1, F + 5, z1, ID.BRICK);
+    ring(x0, z0, x1, z1, F + 6, F + 6, ID.PLASTER);
+    put(dx, F + 6, dz, ID.AIR);                                              // a gap in the parapet above the door
     // a poster spot on the wall opposite the door, facing out
     const pw = (door + 2) % 4;
     const px = pw === 1 ? x1 + 1.01 : pw === 3 ? x0 - 0.01 : Math.floor((x0 + x1) / 2) + 0.5;
@@ -537,14 +529,9 @@ WorkerBundle.add(function sitesPart() {
     put(backX - gox, F + 3, backZ - goz, ID.TIMBER);
     P.throne = pt(backX, F + 2, backZ);
     P.hall = { door: pt(dx + gox, F + 1, dz + goz), inside: pt(hx, F + 1, hz) };
-    // roof over the hall (stepped, along its long side)
-    const alongX = (x1 - x0) >= (z1 - z0);
-    const a0 = alongX ? z0 : x0, a1 = alongX ? z1 : x1;
-    for (let k = 0; a0 + k <= a1 - k; k++) {
-      const y = F + 8 + k, lo = a0 + k, hi = a1 - k;
-      if (alongX) { fill(x0, y, lo, x1, y, lo, ID.ROOF); fill(x0, y, hi, x1, y, hi, ID.ROOF); if (hi - lo > 1) { fill(x0, y, lo + 1, x0, y, hi - 1, ID.BRICK); fill(x1, y, lo + 1, x1, y, hi - 1, ID.BRICK); } }
-      else { fill(lo, y, z0, lo, y, z1, ID.ROOF); fill(hi, y, z0, hi, y, z1, ID.ROOF); if (hi - lo > 1) { fill(lo + 1, y, z0, hi - 1, y, z0, ID.BRICK); fill(lo + 1, y, z1, hi - 1, y, z1, ID.BRICK); } }
-    }
+    // flat roof over the hall, with a parapet (the skylight is cut through it below)
+    fill(x0, F + 8, z0, x1, F + 8, z1, ID.COBBLE);
+    ring(x0, z0, x1, z1, F + 9, F + 9, ID.COBBLE);
     // the arms crate in the courtyard, beside the hall door
     {
       const ax = hx + gox * (hd + 2) + (goz ? 4 : 0), az = hz + goz * (hd + 2) + (gox ? 4 : 0);
