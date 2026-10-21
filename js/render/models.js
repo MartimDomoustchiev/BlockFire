@@ -140,7 +140,7 @@ const RIG = { HIP_Y: 0.93, HIP_X: 0.095, THIGH: 0.44, SHIN: 0.42, NECK: 0.52, SH
  * hairStyle picks the hair shape (see BodyGeometry.hairParts); facial: 1 stubble, 2 beard (player looks).
  */
 const OUTFITS = {
-  order:      { shirt: 0x3c4a5c, sleeve: 0x3c4a5c, trousers: 0x262c35, boots: 0x2e2218, belt: 0x5a3e26, trim: 0xb08a3c, hood: 0x34424f, robe: 'tails', robeColor: 0x34424f, bracers: 0x6a4a2e, sash: true },
+  order:      { shirt: 0x3c4a5c, sleeve: 0x3c4a5c, trousers: 0x262c35, boots: 0x2e2218, belt: 0x5a3e26, trim: 0xb08a3c, hood: 0x34424f, robe: 'tails', robeColor: 0x34424f, bracers: 0x6a4a2e, sash: true, scabbard: true, quiver: true },
   mentor:     { shirt: 0xcbb68c, sleeve: 0xcbb68c, trousers: 0xb8a27a, boots: 0x6a4a2a, belt: 0x5a4632, hood: 0xb59d72, robe: 'long', robeColor: 0xc4ad82, beard: 0xe8e4d8 },
   guard:      { bare: true, trousers: 0xdcd0ae, boots: 0x8a6a3c, belt: 0x6a4a28, robe: 'kilt', robeColor: 0xe6dcc0, usekh: 0xc8a040, sash: true, trim: 0x6e4a26, helmet: 0xb98a3c, gloves: 0x7a5530 },
   captain:    { bare: true, trousers: 0xe8dfc4, boots: 0x6a4a28, belt: 0xd8b04a, robe: 'kilt', robeColor: 0xf0e8d0, usekh: 0xd8b04a, nemes: 0x2c4f9a, nemesStripe: 0xd8b04a, plume: 0xf2eee0, cape: 0xb98a4a, gloves: 0x6a4a28, trim: 0xd8b04a },
@@ -163,7 +163,7 @@ function playerOutfit(spec) {
   const s = PLAYER_LOOK.normalize(spec), top = LOOK_TOPS[s.top], acc = LOOK_ACCENTS[s.accent];
   const o = {
     skin: SKIN_TONES[s.skin], shirt: mixHex(top, 0xffffff, 0.35), sleeve: top, jacket: top, trousers: LOOK_BOTTOMS[s.bottom],
-    boots: 0x2a2018, belt: 0x4a3622, trim: acc, hair: LOOK_HAIR[s.hair].color, hairStyle: LOOK_STYLES[s.style],
+    boots: 0x2a2018, belt: 0x4a3622, trim: acc, hair: LOOK_HAIR[s.hair].color, hairStyle: LOOK_STYLES[s.style], bracers: 0x4a3420, scabbard: true,
   };
   if (s.facial) o.facial = s.facial;
   if (s.hood) o.hood = acc;
@@ -184,6 +184,13 @@ function humanDress(o) {
       robe: o.robe, robeColor: o.robeColor, trim: o.trim !== undefined ? o.trim : mixHex(o.robeColor || 0x888888, 0x000000, 0.25),
       belt: o.belt, hood: o.hood, scarf: o.scarf, cloak: o.cloak !== undefined ? o.cloak : o.cape,
       beard: o.beard !== undefined ? o.beard : o.facial === 2 ? o.hair || 0x3a2a1a : undefined,
+      sash: o.sash ? (o.trim !== undefined ? o.trim : 0xb08a3c) : undefined,
+      // the accents, on High and up (HumanModels.tier): boots (not with a kilt), bracers, the belt's buckle and pouches
+      ...(HumanModels.tier >= 1 ? {
+        boots: o.robe !== 'kilt' && !o.bare && o.boots !== undefined ? o.boots : undefined, bootsTrim: o.boots !== undefined ? mixHex(o.boots, 0x000000, 0.35) : undefined,
+        bracers: o.bracers, bracersTrim: o.bracers !== undefined ? mixHex(o.bracers, 0x000000, 0.4) : undefined,
+        kit: o.belt !== undefined && o.robe !== 'kilt' ? o.belt : undefined,
+      } : {}),
       collar: o.usekh, collarStripe: o.usekh !== undefined ? mixHex(o.usekh, 0x2c4f9a, 0.65) : undefined,
     },
   };
@@ -428,7 +435,8 @@ const BodyGeometry = {
   garments(o) {
     const K = BodyKit, R = RIG, S = {}, T = [], H = [];
     // the bodies' own garments (skinned: robes, the kilt, the hood, the headcloth, the cloak, the beard) replace these
-    if (o.skinned) o = Object.assign({}, o, { robe: null, hood: null, scarf: null, cape: null, cloak: null, beard: null, usekh: null });
+    if (o.skinned) o = Object.assign({}, o, { robe: null, hood: null, scarf: null, cape: null, cloak: null, beard: null, usekh: null, sash: null,
+      bracers: o.accents ? null : o.bracers });
     if (o.tabard) T.push(K.box(0.32, 0.66, 0.022, o.tabard, 0, 0.13, -0.142), K.box(0.32, 0.66, 0.022, o.tabard, 0, 0.13, 0.142));
     if (o.apron) T.push(K.box(0.32, 0.72, 0.02, o.apron, 0, 0.08, -0.14));
     if (o.sash) T.push(K.box(0.07, 0.52, 0.02, o.trim, 0.02, 0.24, -0.135, 0, 0, 0.55));
@@ -533,9 +541,10 @@ const WeaponGeometry = {
 
 /** A bow with a live string and a nocked arrow: draw(0..1) pulls the string (and arrow) back. */
 class BowRig {
-  constructor(mat) {
+  /** `fp`: drawn in the first-person view (render/weapons.js materials without the world's shadow). */
+  constructor(mat, fp) {
     this.group = new THREE.Group();
-    this.group.add(new THREE.Mesh(WeaponGeometry.get('bow'), mat));
+    this.group.add(WeaponModels.make('bow', { fp }));
     this.tipY = 0.62; this.tipZ = 0.17 - 0.1;                                                        // where the limbs end
     const strMat = new THREE.MeshBasicMaterial({ color: 0xe8e4d4 });
     this.strMat = strMat;
@@ -578,11 +587,25 @@ const CharacterLights = {
     scene.add(hemi, sun);
     this.rigs.set(scene, { hemi, sun });
   },
-  /** Follow the day/night light colour the terrain uses. */
-  update(light) {
+  /**
+   * Follow the day/night light colour the terrain uses. In story mode (`shared`: the story materials' uniforms) the
+   * sun is the story's sun - its direction and colour, the moon at night - and the sky and ground light are the land's.
+   */
+  update(light, shared) {
     const b = (light.r + light.g + light.b) / 3;
     for (const { hemi, sun } of this.rigs.values()) {
+      if (shared && shared.uSunDir) {
+        sun.position.copy(shared.uSunDir.value);
+        sun.color.copy(shared.uSunColor.value);
+        sun.intensity = 1.0;
+        hemi.color.copy(shared.uSkyAmb.value);
+        hemi.groundColor.copy(shared.uGndAmb.value);
+        hemi.intensity = 1.0;
+        continue;
+      }
+      sun.position.set(0.45, 1, 0.3);
       hemi.color.copy(light);
+      hemi.groundColor.setHex(0x50443a);
       hemi.intensity = 0.3 + 0.62 * b;
       sun.color.copy(light);
       sun.intensity = 0.08 + 0.62 * b;
@@ -598,9 +621,11 @@ class CharacterModel {
     // Either way the same rig of joints below is what update() animates.
     const kind = HumanModels.available() && !ch.drawnBody ? (o.female && HumanModels.kinds.female) || HumanModels.kinds.male : null;
     this.gen = HumanModels.generation;          // a newer generation (the people loaded, the preset changed) rebuilds this model
-    const S = BodyGeometry.get(kind ? Object.assign({ garmentsOnly: true, skinned: !!kind.garments }, o) : o);
+    const S = BodyGeometry.get(kind ? Object.assign({ garmentsOnly: true, skinned: !!kind.garments, accents: HumanModels.tier >= 1 }, o) : o);
     // Phong instead of Lambert: a little sheen on fabric and hair, still cheap for dozens of people
     this.mat = new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide, shininess: 12, specular: 0x1c1f24 });
+    this.mat.onBeforeCompile = (sh) => CharShading.inject(sh);          // story: the sun's shadow and the land's tone
+    this.mat.customProgramCacheKey = () => 'char-phong';
     this.mats = [this.mat];
     const group = (parent, x, y, z) => { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; };
     const mesh = (geo, parent, mat) => { if (!geo || !parent) return null; const m = new THREE.Mesh(geo, mat || this.mat); m.layers.enable(SHADOW_LAYER); parent.add(m); return m; };       // casts sun shadows in story mode
@@ -649,6 +674,9 @@ class CharacterModel {
       at.foreR = H.attach('lowerarm_r', 'elbowR', new THREE.Group());
       at.handL = H.attach('hand_l', 'handL', new THREE.Group(), new THREE.Vector3(0, -0.075, 0));
       at.handR = H.attach('hand_r', 'handR', new THREE.Group(), new THREE.Vector3(0, -0.075, 0));
+      // the accents that hang on the body (High and up): a scabbard on the left hip, a quiver across the back
+      if (HumanModels.tier >= 1 && o.scabbard) at.hipL = H.attach('pelvis', 'hips', new THREE.Group(), H.restOffset('pelvis', [-0.2, hipY + 0.02, 0.05]));
+      if (HumanModels.tier >= 1 && o.quiver) at.back = H.attach('spine_03', 'torso', new THREE.Group(), H.restOffset('spine_03', [0.05, hipY + 0.12, 0.17]));
       for (const k in at) if (at[k]) at[k] = at[k].children[0];
     } else {
       Object.assign(at, { torso: this.torso, head: this.head, skirt: this.skirt, cape: this.cape, foreL: this.armL.elbow, foreR: this.armR.elbow, handL: this.armL.hand, handR: this.armR.hand });
@@ -675,10 +703,23 @@ class CharacterModel {
     this.gun.rotation.x = -Math.PI / 2;
     at.handR.add(this.gun);
     // swords: the Order's straight sword and the enforcers' sabre (proper blades, lit like the body)
-    this.swords = { longsword: new THREE.Mesh(WeaponGeometry.get('longsword'), this.mat), sword: new THREE.Mesh(WeaponGeometry.get('sword'), this.mat) };
+    // the Order's sword and the enforcers' khopesh: steel, bronze, brass and leather (render/weapons.js)
+    this.swords = { longsword: WeaponModels.make('longsword'), sword: WeaponModels.make('sword') };
     for (const m of Object.values(this.swords)) { m.position.y = -0.02; at.handR.add(m); }
     // the bow, in the left hand: upright when the arm points forward, string towards us
-    this.bow = new BowRig(this.mat);
+    if (at.hipL) {
+      const sc = this.scabbard = WeaponModels.make('scabbard');
+      sc.rotation.set(-0.75, 0, 0.12);                     // hanging back from the hip, the point well behind
+      this.sheathedHilt = WeaponModels.make('hilt');
+      sc.add(this.sheathedHilt);
+      at.hipL.add(sc);
+    }
+    if (at.back) {
+      const q = this.quiver = WeaponModels.make('quiver');
+      q.rotation.set(0.12, 0, -0.5);                       // slung across the back, the arrows over the right shoulder
+      at.back.add(q);
+    }
+    this.bow = new BowRig(this.mat, false);
     this.bow.group.rotation.x = -Math.PI / 2;
     this.bow.group.position.y = -0.03;
     at.handL.add(this.bow.group);
@@ -739,6 +780,7 @@ class CharacterModel {
     const hasSword = !!(it && it.kind === 'blade' && it.blade && it.blade.visible);
     this.gun.visible = hasGun;
     for (const k in this.swords) this.swords[k].visible = hasSword && it.id === k;
+    if (this.sheathedHilt) this.sheathedHilt.visible = !(hasSword && it.id === 'longsword');      // drawn: the scabbard is empty
     this.bow.group.visible = hasBow;
     const draw = hasBow ? ch.draw || 0 : 0;
     if (hasBow) this.bow.set(draw, !ch.reload && held.data.mag > 0);
@@ -850,7 +892,10 @@ class CharacterModel {
 }
 
 /** main.js calls this once per frame with the terrain light colour: characters follow day and night. */
-CharacterModel.setLight = function (game, light) {
-  CharacterLights.update(light);
-  for (const e of game.entities.values()) if (e.model) { if (!e.model.light) e.model.light = new THREE.Color(); e.model.light.copy(light); }
+CharacterModel.setLight = function (game, light, shared) {
+  CharacterLights.update(light, shared);
+  // in story mode the lights themselves carry the day and night: the colours are not dimmed a second time
+  const tint = shared && shared.uSunDir ? CharacterModel._white : light;
+  for (const e of game.entities.values()) if (e.model) { if (!e.model.light) e.model.light = new THREE.Color(); e.model.light.copy(tint); }
 };
+CharacterModel._white = new THREE.Color(1, 1, 1);

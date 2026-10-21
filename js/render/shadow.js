@@ -12,15 +12,20 @@ const SHADOW_LAYER = 6;                  // the render layer of the things that 
 const PROP_SHADOW_LAYER = 7;             // palms and reeds: drawn in a second pass with their own material (leaflets cut out)
 
 class SunShadow {
-  constructor(size, extent = 46) {
+  /** slot 1: the sharp map round the viewer; slot 2 (Epic): a wide, coarser one for the far land, redrawn less often. */
+  constructor(size, extent = 46, slot = 1) {
     this.size = size;
     this.extent = extent;                               // blocks from the centre to the edge of the map
+    this.slot = slot;
+    this.reach = slot === 2 ? 600 : 130;                // how far up the sun's ray the camera sits (the far map spans more)
+    this.names = slot === 2 ? { map: 'uShadowMap2', matrix: 'uShadowMatrix2', on: 'uShadow2On', texel: 'uShadowTexel2' }
+      : { map: 'uShadowMap', matrix: 'uShadowMatrix', on: 'uShadowOn', texel: 'uShadowTexel' };
     this.rt = new THREE.WebGLRenderTarget(size, size, { depthBuffer: true, stencilBuffer: false });
     this.rt.depthTexture = new THREE.DepthTexture(size, size);
     this.rt.depthTexture.minFilter = THREE.NearestFilter;
     this.rt.depthTexture.magFilter = THREE.NearestFilter;
     const e = this.extent;
-    this.cam = new THREE.OrthographicCamera(-e, e, e, -e, 1, 260);
+    this.cam = new THREE.OrthographicCamera(-e, e, e, -e, 1, this.reach * 2);
     this.cam.layers.set(SHADOW_LAYER);
     this.cam.layers.enable(3); this.cam.layers.enable(4);           // the players' own bodies (LAYER_SELF): they cast too; the map is depth only, nothing of them reaches the screen
     this.mat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide });
@@ -36,8 +41,8 @@ class SunShadow {
 
   /** Puts the shadow uniforms of `shared` right: the map, its matrix, and how strongly the sun's shadows show right now. */
   bind(shared) {
-    shared.uShadowMap.value = this.rt.depthTexture;
-    shared.uShadowTexel.value = 1 / this.size;
+    shared[this.names.map].value = this.rt.depthTexture;
+    shared[this.names.texel].value = 1 / this.size;
   }
 
   /**
@@ -48,7 +53,7 @@ class SunShadow {
     const sun = shared.uSunDir.value, e = this.extent;
     // low sun: shadows would stretch far outside the map; fade them out and stop drawing the pass
     const strength = Math.max(0, Math.min(1, (sun.y - 0.1) / 0.14));
-    shared.uShadowOn.value = strength;
+    shared[this.names.on].value = strength;
     if (strength <= 0.001) { this._valid = false; return; }
     camera.getWorldDirection(this._dir);
     this._dir.y = 0;
@@ -56,10 +61,11 @@ class SunShadow {
     this._focus.copy(camera.position).addScaledVector(this._dir, e * 0.4);
     const moved = this._focus.distanceTo(this._at), turned = 1 - sun.dot(this._sun);
     this._age++;
-    if (this._valid && moved < 3 && turned < 0.0004 && this._age < 15) return;     // the map from the last pass still fits
+    const far = this.slot === 2;
+    if (this._valid && moved < (far ? 14 : 3) && turned < (far ? 0.0015 : 0.0004) && this._age < (far ? 45 : 15)) return;     // the map from the last pass still fits
     this._valid = true; this._age = 0; this._at.copy(this._focus); this._sun.copy(sun);
     const cam = this.cam;
-    cam.position.copy(this._focus).addScaledVector(sun, 130);
+    cam.position.copy(this._focus).addScaledVector(sun, this.reach);
     cam.up.set(0, 1, 0);
     cam.lookAt(this._focus);
     cam.updateMatrixWorld();
@@ -70,7 +76,7 @@ class SunShadow {
     const px = cam.position.dot(this._right), py = cam.position.dot(this._up);
     cam.position.addScaledVector(this._right, Math.round(px / texel) * texel - px).addScaledVector(this._up, Math.round(py / texel) * texel - py);
     cam.updateMatrixWorld();
-    shared.uShadowMatrix.value.multiplyMatrices(cam.projectionMatrix, this._m.copy(cam.matrixWorld).invert());
+    shared[this.names.matrix].value.multiplyMatrices(cam.projectionMatrix, this._m.copy(cam.matrixWorld).invert());
 
     const prevTarget = renderer.getRenderTarget(), prevBg = scene.background, prevOverride = scene.overrideMaterial, prevScissor = renderer.getScissorTest();
     scene.background = null;

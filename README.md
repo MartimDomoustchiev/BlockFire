@@ -259,9 +259,14 @@ world generation parameters and more.
 ## Graphics
 
 Settings > Graphics picks a preset (Low, Medium, High or Ultra: render distance, sharpness, how far story people are
-drawn). The default, *Auto*, picks Ultra on a desktop graphics card (Radeon RX, GeForce RTX and the like), Medium on
+drawn). The default, *Auto*, picks Epic or Ultra on a desktop graphics card (Radeon RX, GeForce RTX and the like), Medium on
 phones and High elsewhere. Ultra draws the scene at 1.5x with 4x anti-aliasing and filters it down sharp, adds bloom,
 sun rays and a film grade, a wider and finer shadow map, cumulus clouds and 12 chunks of view.
+In story mode people stand in the land's light (its sun, its shadows); from High up they wear boots, bracers, pouches,
+a scabbard and a quiver, and on Ultra and Epic their skin, cloth, hair and eyes use physical materials. Swords and the bow
+are modelled in steel, bronze, brass, wood and leather.
+*Epic* (the newest desktop cards: Radeon RX 6600 and up, GeForce RTX) adds ambient occlusion, distant shadows, the sea
+mirroring the island, grass in the fields, 2x supersampling and 16 chunks of view.
 *Auto resolution* sharpens or softens the picture to keep the frame rate up. Auto distance is separate.
 On Medium and above, people are real human bodies (MakeHuman, see Originality) in garments made for them (the Order's
 hooded coat, robes, kilts, cloaks, headcloths, collars, beards) that move with the body; Low keeps the lighter drawn

@@ -23,9 +23,6 @@ node_modules/
 *.log
 .env
 
-# Linked in post
-linkedin-post
-
 # Android and iPhone apps (native/): the web files are copied in by `npm run sync`, the rest is build output
 native/node_modules/
 native/www/

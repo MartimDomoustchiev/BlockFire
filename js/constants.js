@@ -511,6 +511,13 @@ const CONFIG = {
     ultra:  { rd: 12, pixelRatio: 2, npcDraw: 130, shadow: 8192, shadowExtent: 80, aniso: 16, clouds: 1,
       post: { msaa: 4, ssaa: 1.5, bloom: 0.3, rays: 0.4, grade: 1, sharpen: 0.4, vignette: 0.22 },
       autoRes: { SLOW_MS: 17.5, FAST_MS: 12, MIN: 0.67, MAX: 1.34 } },
+    // the newest desktop cards (Radeon RX 6600 and up, any GeForce RTX): Ultra, plus ambient occlusion, a second shadow map
+    // for the far land, the sea and rivers mirroring the world, grass in the fields, twice the resolution and a longer view.
+    // Auto resolution gives back down to Ultra's 1.5x when a frame takes longer than ~8 ms (120 fps)
+    epic:   { rd: 16, pixelRatio: 2, npcDraw: 160, shadow: 8192, shadowExtent: 72, shadowFar: { size: 4096, extent: 340 }, aniso: 16, clouds: 1,
+      grass: 2, reflect: 0.6,
+      post: { msaa: 4, ssaa: 2, bloom: 0.3, rays: 0.42, grade: 1, sharpen: 0.32, vignette: 0.22, ao: 0.9 },
+      autoRes: { SLOW_MS: 8.5, FAST_MS: 5.5, MIN: 0.75, MAX: 1.0 } },
   },
   AUTO_RESOLUTION: { MIN: 0.6, STEP: 0.1, SLOW_MS: 34, FAST_MS: 19, SLOW_TIME: 2.5, FAST_TIME: 6 },   // resolution scale 0.6-1 (see main.js)
 

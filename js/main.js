@@ -45,6 +45,7 @@
   // graphics quality: render distance and pixel ratio presets, and a resolution that adapts to the frame rate.
   // 'auto' (the default) stands for the preset that suits the graphics card: Ultra on a desktop card (render/post.js).
   const gpuName = GpuTier.name(renderer);
+  CharShading.init(renderer);            // people's light in story mode: the sun's shadow, the land's tone, a sky to reflect
   const autoQuality = GpuTier.pick(gpuName, TouchUI.wanted());
   if (params.has('quality')) settings.quality = params.get('quality');
   const qualityName = () => (CONFIG.QUALITY[settings.quality] ? settings.quality : autoQuality);
@@ -77,8 +78,10 @@
     dynRes.scale = 1;
     applyTextureQuality();
     HumanModels.setEnabled(humansWanted());
+    HumanModels.setTier(p.post ? 2 : qualityName() === 'high' ? 1 : 0);      // Ultra / Epic: physical materials; High: fine relief
     if (HumanModels.enabled) HumanModels.load();
     if (startStage.model && startStage.model.gen !== HumanModels.generation) startStage.setLook(settings.look);
+    if (game) game.world.setGrass(p.grass || 0);
     if (!start) {
       settings.renderDistance = p.rd; saveSettings(settings);
       const rd = document.getElementById('rd'); if (rd) { rd.value = p.rd; document.getElementById('rdVal').textContent = p.rd + ' ch'; }
@@ -131,6 +134,8 @@
   // the start screen: your character on the stage, in the look you chose, with the Order's sword at its side
   const startStage = new LobbyStage(renderer, document.getElementById('stageSlot'));
   window.__lobby = startStage;     // tests and debugging: the start screen's stage
+  window.__refl = () => refl;     // debugging: the sea's reflection (its targets and mirrored camera)
+  window.__post = () => post;     // debugging: the post-processing (its options, ao = 9 shows the occlusion alone)
   window.__gfx = () => ({ quality: qualityName(), auto: autoQuality, gpu: gpuName, post: !!(preset().post && post), ratio: post ? post.ratio : 0,
     pixelRatio: renderer.getPixelRatio(), shadow: sunShadow ? [sunShadow.size, sunShadow.extent] : null, clouds: sky.clouds });
   const autoOpt = document.querySelector('#quality option[value="auto"]');
@@ -188,12 +193,73 @@
     scene.fog.far = far;
   }
   /** Story mode: the sun's shadow map for this frame, centred on the first view; off when the preset has none. */
+  let farShadow = null;                   // Epic: the wide second map for the far land
   function updateSunShadow(camera) {
     const M = mats(), size = shadowSize(), extent = preset().shadowExtent || 46;
     if (!M.story || !size) { if (M.shared.uShadowOn) M.shared.uShadowOn.value = 0; return; }
     if (!sunShadow || sunShadow.size !== size || sunShadow.extent !== extent) { if (sunShadow) sunShadow.dispose(); sunShadow = new SunShadow(size, extent); }
     sunShadow.bind(M.shared);
     sunShadow.render(renderer, scene, M.shared, camera, M.propDepth);
+    const F = preset().shadowFar;
+    if (!F) { if (farShadow) { farShadow.dispose(); farShadow = null; } M.shared.uShadow2On.value = 0; return; }
+    if (!farShadow || farShadow.size !== F.size || farShadow.extent !== F.extent) { if (farShadow) farShadow.dispose(); farShadow = new SunShadow(F.size, F.extent, 2); }
+    farShadow.bind(M.shared);
+    farShadow.render(renderer, scene, M.shared, camera, M.propDepth);
+  }
+  // Epic: the sea mirrors the world. Each view draws the scene from its camera mirrored in the sea's surface (the water
+  // itself hidden, everything under the surface clipped by an oblique near plane) into a smaller image the water shader
+  // projects into (the same arrangement as three.js's Reflector)
+  const WATER_SURFACE_DROP = 0.125;       // the sea's top faces sit this far under the block top (worker/mesher.js)
+  const refl = { rts: [], cam: new THREE.PerspectiveCamera(), m: new THREE.Matrix4(), rot: new THREE.Matrix4(), n: new THREE.Vector3(0, 1, 0),
+    p: new THREE.Vector3(), v: new THREE.Vector3(), t: new THREE.Vector3(), look: new THREE.Vector3(), plane: new THREE.Plane(), clip: new THREE.Vector4(), q: new THREE.Vector4() };
+  function renderReflection(v, i, underwater) {
+    const M = mats(), k = preset().reflect, cam = v.camera;
+    if (!M.story || !M.shared.uReflOn) return;
+    const h = CONFIG.SEA_LEVEL + 1 - WATER_SURFACE_DROP;          // the sea's top blocks are at SEA_LEVEL
+    M.shared.uReflOn.value = 0;
+    if (!k || underwater || cam.position.y < h + 0.05) return;
+    const pr = renderer.getPixelRatio(), W = Math.max(16, Math.round(v.rect.w * pr * k)), H = Math.max(16, Math.round(v.rect.h * pr * k));
+    let rt = refl.rts[i];
+    if (!rt) rt = refl.rts[i] = new THREE.WebGLRenderTarget(W, H, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false });
+    if (rt.width !== W || rt.height !== H) rt.setSize(W, H);
+    const R = refl, rc = R.cam, n = R.n;
+    R.p.set(0, h, 0);
+    cam.updateMatrixWorld();
+    R.v.setFromMatrixPosition(cam.matrixWorld);
+    R.rot.extractRotation(cam.matrixWorld);
+    R.look.set(0, 0, -1).applyMatrix4(R.rot).add(R.v);
+    // the mirrored eye and the mirrored point it looks at
+    rc.position.set(R.v.x, 2 * h - R.v.y, R.v.z);
+    R.t.set(R.look.x, 2 * h - R.look.y, R.look.z);
+    rc.up.set(0, 1, 0).applyMatrix4(R.rot).reflect(n);
+    rc.lookAt(R.t);
+    rc.near = cam.near; rc.far = cam.far; rc.layers.mask = cam.layers.mask;
+    rc.updateMatrixWorld();
+    rc.projectionMatrix.copy(cam.projectionMatrix);
+    rc.matrixWorldInverse.copy(rc.matrixWorld).invert();
+    M.shared.uReflMatrix.value.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
+      .multiply(rc.projectionMatrix).multiply(rc.matrixWorldInverse);
+    // oblique near plane: nothing below the surface reaches the mirror (Eric Lengyel's projection trick)
+    R.plane.setFromNormalAndCoplanarPoint(n, R.p).applyMatrix4(rc.matrixWorldInverse);
+    R.clip.set(R.plane.normal.x, R.plane.normal.y, R.plane.normal.z, R.plane.constant);
+    const e = rc.projectionMatrix.elements;
+    R.q.set((Math.sign(R.clip.x) + e[8]) / e[0], (Math.sign(R.clip.y) + e[9]) / e[5], -1, (1 + e[10]) / e[14]);
+    R.clip.multiplyScalar(2 / R.clip.dot(R.q));
+    e[2] = R.clip.x; e[6] = R.clip.y; e[10] = R.clip.z + 1 - 0.003; e[14] = R.clip.w;
+    rc.projectionMatrixInverse.copy(rc.projectionMatrix).invert();
+    // draw it, without the water
+    const prevTarget = renderer.getRenderTarget(), prevScissor = renderer.getScissorTest();
+    const wasWater = M.water.visible, wasOcean = ocean ? ocean.visible : false;
+    M.water.visible = false; if (ocean) ocean.visible = false;
+    rt.viewport.set(0, 0, W, H); rt.scissorTest = false;
+    renderer.setRenderTarget(rt);
+    renderer.setScissorTest(false);
+    renderer.clear();
+    renderer.render(scene, rc);
+    M.water.visible = wasWater; if (ocean) ocean.visible = wasOcean;
+    renderer.setRenderTarget(prevTarget);
+    renderer.setScissorTest(prevScissor);
+    M.shared.uReflect.value = rt.texture; M.shared.uReflOn.value = refl.debug ? 2 : 1; M.shared.uReflH.value = h;
   }
   let ocean = null;                       // story: the sea out to the horizon (the story materials' `ocean`)
   const OCEAN_FAR = 1300;                 // story cameras see this far: the ocean fades into the haze before it ends
@@ -371,6 +437,7 @@
     currentMode = mode;
     effectiveRd = settings.renderDistance;
     game = new Game({ scene, materials: materialsFor(mode), seed, mode, renderDistance: effectiveRd });
+    game.world.setGrass(preset().grass || 0);          // Epic: grass in the story's fields
     if (mode === 'duel') game.rules.respawn = settings.duelRespawn === 1;
     applyDistance();
 
@@ -533,6 +600,7 @@
     views[0].match.hideResults();
     effectiveRd = settings.renderDistance;
     game = new Game({ scene, materials: materialsFor(m.mode), seed: m.seed, mode: m.mode, renderDistance: effectiveRd, replica: true });
+    game.world.setGrass(preset().grass || 0);          // Epic: grass in the story's fields
     game.rules.respawn = !!m.respawn;
     game._nextId = 1e9;
     game.timeOfDay = m.tod;
@@ -786,7 +854,8 @@
     const light = mats().shared.uLight.value;
     DropVisuals.tint(light);
     effects.update(frameDt, views[0].camera, light);
-    if (game) CharacterModel.setLight(game, light);
+    if (game) CharacterModel.setLight(game, light, mats().story ? mats().shared : null);
+    CharShading.sync(game && mats().story ? mats().shared : null, HumanModels.tier >= 1);
     renderer.info.reset();
     if (!game) {
       // no game running: the start screen's stage
@@ -810,6 +879,7 @@
       updateOcean(v.camera, underwater);          // first: the sky dome is sized from the camera's reach
       sky.update(game ? game.timeOfDay : CONFIG.TIME.START, mats().shared, underwater);
       if (v === active[0]) updateSunShadow(v.camera);
+      renderReflection(v, active.indexOf(v), underwater);
       v.viewmodel.light.copy(mats().shared.uLight.value);
       v.render(renderer, scene, pp);
     }

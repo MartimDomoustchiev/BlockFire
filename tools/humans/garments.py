@@ -397,7 +397,7 @@ def hood(fit, root, mat, name, peak, cape):
                 d = Vector((dx * math.cos(er), dy * math.cos(er), math.sin(er)))
                 hit = fit.ray_in(fit.head, c + d * 0.35, c)
                 r = (hit - c).length if hit else 0.1
-                g = 0.03 + 0.06 * max(0.0, dy) ** 1.2 * _smooth(el, -50, 10) + 0.022 * max(0.0, math.sin(er))
+                g = 0.03 + 0.06 * max(0.0, dy) ** 1.2 * _smooth(el, -50, 10) * (1 - 0.85 * _smooth(el, 35, 80)) + 0.008 * max(0.0, math.sin(er))   # roomy behind, round over the crown
                 # round the opening the cloth stands off the cheeks and frames the face
                 g += 0.012 * _smooth(-dy, 0.3, 0.9)
                 p = c + d * (r + g)
@@ -519,6 +519,41 @@ def collar(fit, root, mat):
     return S.build("garment_collar", root, mat)
 
 
+def sash(fit, root, mat):
+    """A sash worn across the body: a band round the torso in a tilted plane, high at the left shoulder, low at the right
+    hip, laid on the clothes."""
+    C, rows = 72, 4
+    pel = fit.bone["pelvis"][0]
+    sp3 = fit.bone["spine_03"]
+    zc = (sp3[0].z + fit.bone["spine_01"][0].z) / 2 + 0.06
+    cy = (pel.y + sp3[0].y) / 2
+    tilt = math.radians(36)
+    S = Sheet(rows, C, False)
+    for i in range(rows):
+        off = -0.035 + 0.07 * i / (rows - 1)
+        for j in range(C):
+            th = 2 * math.pi * j / (C - 1)
+            dx, dy = math.sin(th), -math.cos(th)
+            z = zc + math.tan(tilt) * dx * 0.17 + off
+            hit = fit.ray_in(fit.torso, Vector((dx * 0.6, cy + dy * 0.6, z)), Vector((0, cy, z)))
+            r = (Vector((0, cy, z)) - hit).length if hit else 0.15
+            S.P[rows - 1 - i][j] = Vector((dx * (r + 0.012), cy + dy * (r + 0.012), z))
+            k = _smooth(z, fit.bone["spine_01"][0].z, sp3[1].z)
+            S.W[rows - 1 - i][j] = {"spine_01": 1 - k, "spine_03": k}
+            S.UV[rows - 1 - i][j] = (th * 0.17 / 0.08, off / 0.08)
+            S.trim[rows - 1 - i][j] = 0.0
+            S.shade[rows - 1 - i][j] = 0.85 if i in (0, rows - 1) else 1.0
+    for _ in range(2):
+        NP = [[S.P[i][j].copy() for j in range(C)] for i in range(rows)]
+        for i in range(rows):
+            for j in range(C):
+                jl, jr = (j - 1) % (C - 1), (j + 1) % (C - 1)
+                q = (S.P[i][jl] + S.P[i][jr]) / 2
+                NP[i][j] = S.P[i][j].lerp(q, 0.5) if (q - Vector((0, cy, q.z))).length > (S.P[i][j] - Vector((0, cy, S.P[i][j].z))).length - 0.002 else S.P[i][j]
+        S.P = NP
+    return S.build("garment_sash", root, mat)
+
+
 def cloak(fit, root, mat, length):
     """A cloak down the back, from the shoulders. Its top follows the upper back; below it hangs from the `cloak` bone."""
     C = 30
@@ -568,6 +603,152 @@ def cloak(fit, root, mat, length):
             S.shade[i][j] = 0.74 + 0.26 * (0.5 + 0.5 * math.sin(a * 5 + seed + z * 3.1))
     S.flip = False
     return S.build("garment_cloak", root, mat)
+
+
+def _limb_bvh(fit, names):
+    """A BVH of the body and clothes where they hang from the given bones (one limb, so rays do not find the other)."""
+    return _bvh([fit.body] + fit.clothes, lambda ob, v: _weight(ob, v, names) > 0.35)
+
+
+def _sleeve(fit, root, mat, name, bone, child, t0, t1, gap, rows, cuff, straps, w_of, cuff_top=False):
+    """A tube round a limb bone from t0 to t1 of its length (0 at the bone's head): rays from outside in to the bone's line."""
+    S = None
+    out = []
+    for side in ("l", "r"):
+        b = bone + "_" + side
+        h, t = fit.bone[b][0], fit.bone[child + "_" + side][0]
+        axis = (t - h)
+        L = axis.length
+        ax = axis.normalized()
+        # a frame round the bone
+        ref = Vector((0, 0, 1)) if abs(ax.z) < 0.9 else Vector((1, 0, 0))
+        u = ax.cross(ref).normalized()
+        v = ax.cross(u).normalized()
+        bvh = _limb_bvh(fit, (bone + "_" + side, child + "_" + side) if child else (bone + "_" + side,))
+        C = 28
+        Sh = Sheet(rows, C, False)
+        for i in range(rows):
+            f = i / (rows - 1)
+            c = h + ax * (L * (t0 + (t1 - t0) * f))
+            for j in range(C):
+                a = 2 * math.pi * j / (C - 1)
+                d = u * math.cos(a) + v * math.sin(a)
+                hit = fit.ray_in(bvh, c + d * 0.25, c)
+                r = (hit - c).length if hit else 0.05
+                cf = 1 - f if cuff_top else f
+                extra = cuff * _smooth(cf, 0.82, 1.0)
+                Sh.P[i][j] = c + d * (r + gap + extra)
+                Sh.W[i][j] = w_of(side, f)
+                Sh.UV[i][j] = (a * 0.05 / 0.08, f * L * (t1 - t0) / 0.08)
+                band = any(abs(f - sb) < 0.05 for sb in straps)
+                Sh.trim[i][j] = 1.0 if (band or cf > 0.88) else 0.0
+                Sh.shade[i][j] = 0.85 if band else 1.0
+        # smooth round the ring (the rays meet seams and folds of the clothes)
+        for _ in range(2):
+            NP = [[Sh.P[i][j].copy() for j in range(C)] for i in range(rows)]
+            for i in range(rows):
+                for j in range(C):
+                    jl, jr = (j - 1) % (C - 1), (j + 1) % (C - 1)
+                    q = (Sh.P[i][jl] + Sh.P[i][jr]) / 2
+                    NP[i][j] = Sh.P[i][j].lerp(q, 0.4)
+            Sh.P = NP
+        out.append(Sh)
+    # both limbs in one mesh: build the first, then the second into the same object
+    ob = out[0].build(name, root, mat)
+    ob2 = out[1].build(name + "_r", root, mat)
+    _join(ob, ob2)
+    return ob
+
+
+def _join(a, b):
+    """Join mesh object b into a (vertex groups and colours come along)."""
+    bpy.ops.object.select_all(action="DESELECT")
+    a.select_set(True)
+    b.select_set(True)
+    bpy.context.view_layer.objects.active = a
+    bpy.ops.object.join()
+
+
+def boots(fit, root, mat):
+    """Leather boots over the calves, from the shoe to under the knee, a folded cuff at the top and two straps."""
+    return _sleeve(fit, root, mat, "garment_boots", "calf", "foot", 0.1, 0.95, 0.007, 16, 0.012, (0.45, 0.7),
+                   lambda side, f: {"calf_" + side: 1.0 - 0.6 * _smooth(f, 0.85, 1.0), "foot_" + side: 0.6 * _smooth(f, 0.85, 1.0)}, cuff_top=True)
+
+
+def bracers(fit, root, mat):
+    """Leather bracers over the forearms, laced in three bands, from the wrist two thirds of the way to the elbow."""
+    return _sleeve(fit, root, mat, "garment_bracers", "lowerarm", "hand", 0.3, 0.96, 0.006, 10, 0.004, (0.25, 0.5, 0.75),
+                   lambda side, f: {"lowerarm_" + side: 1.0 - 0.5 * _smooth(f, 0.85, 1.0), "hand_" + side: 0.5 * _smooth(f, 0.85, 1.0)})
+
+
+def belt_kit(fit, root, mat, z):
+    """On the belt: a brass buckle at the front and two leather pouches with flaps (right hip, back left)."""
+    pel = fit.bone["pelvis"][0]
+    cx, cy = 0.0, pel.y + 0.01
+    verts, faces, cols, ws = [], [], [], []
+    def ring_r(th):
+        d = (math.sin(th), -math.cos(th))
+        hit = fit.ray_in(fit.torso, Vector((cx + d[0] * 0.6, cy + d[1] * 0.6, z)), Vector((cx, cy, z)))
+        return ((Vector((cx, cy, z)) - hit).length if hit else 0.16) + 0.02, d
+    def box(th, w, h, dep, zc, trim, flap):
+        r, d = ring_r(th)
+        n = Vector((d[0], d[1], 0))
+        t = Vector((-d[1], d[0], 0))
+        up = Vector((0, 0, 1))
+        c = Vector((cx, cy, 0)) + n * (r + dep / 2) + up * zc
+        base = len(verts)
+        # a box with its corners pulled in a little (stitched leather, not a crate)
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                for sz in (-1, 1):
+                    k = 0.82 if (sz > 0 and sy > 0) else 1.0
+                    p = c + t * (sx * w / 2 * k) + up * (sy * h / 2) + n * (sz * dep / 2 * (0.75 if sy > 0 else 1.0))
+                    verts.append(p)
+                    cols.append((trim, 1.0 if sz > 0 else 0.8))
+                    ws.append({"pelvis": 1.0})
+        idx = lambda sx, sy, sz: base + ((sx > 0) * 4 + (sy > 0) * 2 + (sz > 0))
+        for q in ((-1, 1), (1, -1)):
+            pass
+        quads = [
+            (idx(-1, -1, 1), idx(1, -1, 1), idx(1, 1, 1), idx(-1, 1, 1)),     # front
+            (idx(1, -1, -1), idx(-1, -1, -1), idx(-1, 1, -1), idx(1, 1, -1)),  # back
+            (idx(-1, 1, 1), idx(1, 1, 1), idx(1, 1, -1), idx(-1, 1, -1)),      # top
+            (idx(-1, -1, -1), idx(1, -1, -1), idx(1, -1, 1), idx(-1, -1, 1)),  # bottom
+            (idx(1, -1, 1), idx(1, -1, -1), idx(1, 1, -1), idx(1, 1, 1)),      # +t side
+            (idx(-1, -1, -1), idx(-1, -1, 1), idx(-1, 1, 1), idx(-1, 1, -1)),  # -t side
+        ]
+        faces.extend(quads)
+        if flap:              # a flap over the top half of the front, standing off a few millimetres
+            fb = len(verts)
+            for (sx, sy) in ((-1, 0.05), (1, 0.05), (1, 1.05), (-1, 1.05)):
+                p = c + t * (sx * w / 2 * 0.92) + up * (sy * h / 2) + n * (dep / 2 + 0.004)
+                verts.append(p)
+                cols.append((1.0 if sy < 0.5 else 0.0, 0.9))
+                ws.append({"pelvis": 1.0})
+            faces.append((fb, fb + 1, fb + 2, fb + 3))
+    box(0.0, 0.055, 0.045, 0.012, z, 1.0, False)                 # the buckle
+    box(-0.95, 0.085, 0.1, 0.038, z - 0.055, 0.0, True)           # a pouch on the right hip
+    box(2.55, 0.075, 0.085, 0.034, z - 0.05, 0.0, True)           # a smaller one at the back left
+    me = bpy.data.meshes.new("garment_kit")
+    me.from_pydata([tuple(v) for v in verts], [], faces)
+    me.update()
+    ob = bpy.data.objects.new("garment_kit", me)
+    bpy.context.scene.collection.objects.link(ob)
+    uv = me.uv_layers.new(name="UVMap")
+    for poly in me.polygons:
+        for k, li in enumerate(poly.loop_indices):
+            uv.data[li].uv = ((0, 0), (1, 0), (1, 1), (0, 1))[k % 4]
+    col = me.color_attributes.new(name="Col", type="BYTE_COLOR", domain="POINT")
+    for k, (t, sh) in enumerate(cols):
+        col.data[k].color = (t, sh, 0.0, 1.0)
+    me.color_attributes.active_color = col
+    g = ob.vertex_groups.new(name="pelvis")
+    g.add(list(range(len(verts))), 1.0, "REPLACE")
+    ob.data.materials.append(mat)
+    ob.parent = root
+    mod = ob.modifiers.new("Armature", "ARMATURE")
+    mod.object = root
+    return ob
 
 
 def add_cloak_bone(root):
@@ -666,10 +847,14 @@ def make_garments(root, body, male):
         skirt(fit, root, mat, "garment_coat", waist + 0.01, 0.3, "coat"),
         skirt(fit, root, mat, "garment_kilt", waist + 0.01, 0.6, "kilt"),
         belt(fit, root, mat, waist - 0.025, waist + 0.03),
-        hood(fit, root, mat, "garment_hood", 0.03, True),
+        hood(fit, root, mat, "garment_hood", 0.014, True),
         hood(fit, root, mat, "garment_scarf", 0.0, False),
         cloak(fit, root, mat, 0.98),
         collar(fit, root, mat),
+        sash(fit, root, mat),
+        boots(fit, root, mat),
+        bracers(fit, root, mat),
+        belt_kit(fit, root, mat, waist + 0.003),
     ]
     if male:
         made.append(beard(fit, root, body, mat))

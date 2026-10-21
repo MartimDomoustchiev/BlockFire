@@ -41,6 +41,7 @@ function humanPart(name) {
 
 const HumanModels = {
   ready: false, failed: false, loading: false, enabled: true,
+  tier: 0,                   // how finely people are drawn: 0 Medium, 1 High (fine relief), 2 Ultra / Epic (physical materials)
   generation: 0,             // changes when people become available or are switched on or off: models built before it rebuild
   kinds: {},
   listeners: [],
@@ -67,6 +68,14 @@ const HumanModels = {
 
   /** Calls fn once the people are ready (now, if they are). */
   onReady(fn) { if (this.ready) fn(); else this.listeners.push(fn); },
+
+  /** The preset's level of detail for people (setTier(2) on Ultra and Epic); a change rebuilds them. */
+  setTier(t) {
+    t = t | 0;
+    if (t === this.tier) return;
+    this.tier = t;
+    this.generation++;
+  },
 
   /** True when a character should be drawn as a real person. */
   available() { return this.ready && this.enabled; },
@@ -165,12 +174,29 @@ const HumanModels = {
   },
 };
 
-/** A material for one part of a person: the texture as it is (`plain`) or turned grey and tinted (lo below the belt, hi above). */
+/**
+ * A material for one part of a person: the texture as it is (`plain`) or turned grey and tinted (lo below the belt, hi
+ * above). opts: rough, alphaTest, double, eye, garment, and the kind of surface for the finer presets: skin, cloth,
+ * leather, hair (a soft sheen of the right colour, pores or weave in the relief; render/char-shading.js).
+ */
 function humanMaterial(map, plain, opts = {}) {
   // the game works in display colours (no sRGB decode / encode anywhere): read the texture as it is
   if (map && map.encoding !== THREE.LinearEncoding) { map.encoding = THREE.LinearEncoding; map.needsUpdate = true; }
-  const m = new THREE.MeshStandardMaterial({ map, roughness: opts.rough || 0.8, metalness: 0, alphaTest: opts.alphaTest || 0,
-    side: opts.double ? THREE.DoubleSide : THREE.FrontSide });
+  const tier = HumanModels.tier, phys = tier >= 2;
+  const params = { map, roughness: opts.rough || 0.8, metalness: 0, alphaTest: opts.alphaTest || 0, side: opts.double ? THREE.DoubleSide : THREE.FrontSide };
+  const m = phys ? new THREE.MeshPhysicalMaterial(params) : new THREE.MeshStandardMaterial(params);
+  if (phys) {
+    // skin: light scatters under it and glows red at the edges; cloth and hair: a soft sheen; eyes: wet
+    if (opts.skin) { m.sheen = 0.3; m.sheenRoughness = 0.55; m.sheenColor.setRGB(0.55, 0.18, 0.12); m.specularIntensity = 0.5; m.roughness = 0.52; m.userData.warm = true; }
+    if (opts.cloth || opts.garment) { m.sheen = 0.22; m.sheenRoughness = 0.8; m.sheenColor.setRGB(0.3, 0.3, 0.3); m.userData.sheenTint = true; }
+    if (opts.leather) { m.roughness = 0.55; m.specularIntensity = 0.7; }
+    if (opts.hair) { m.sheen = 0.5; m.sheenRoughness = 0.3; m.sheenColor.setRGB(0.6, 0.55, 0.5); m.userData.sheenTint = true; m.roughness = 0.42; }
+    if (opts.eye) { m.clearcoat = 1; m.clearcoatRoughness = 0.04; m.roughness = 0.2; }
+    if (opts.alphaTest) m.alphaToCoverage = true;           // smooth hair and lash edges through the multisampling
+  }
+  m.envMap = CharShading.env; m.envMapIntensity = opts.eye ? 0.9 : opts.leather ? 0.4 : opts.skin ? 0.14 : 0.2;
+  const detail = tier >= 1 ? (opts.skin ? 'skin' : opts.leather ? 'metal' : (opts.cloth || opts.garment) ? 'cloth' : '') : '';
+  const detailScale = opts.garment ? 0.06 : 1;
   const u = m.userData.u = { uLo: { value: new THREE.Color(1, 1, 1) }, uHi: { value: new THREE.Color(1, 1, 1) }, uCut: { value: new THREE.Vector2() } };
   m.userData.lo = new THREE.Color(1, 1, 1); m.userData.hi = new THREE.Color(1, 1, 1);
   const G = !!opts.garment;
@@ -194,8 +220,9 @@ function humanMaterial(map, plain, opts = {}) {
         }` : ''}
         diffuseColor.a *= texelColor.a;
         if ( vUnder > 0.5 && ( vTop > 0.5 ? uCut.y : uCut.x ) > 0.5 ) discard;`);
+    CharShading.inject(sh, { detail, detailScale, warm: !!m.userData.warm });
   };
-  m.customProgramCacheKey = () => (plain ? 'human-plain' : 'human-tint') + (opts.eye ? '-eye' : '') + (G ? '-garment' : '');
+  m.customProgramCacheKey = () => (plain ? 'human-plain' : 'human-tint') + (opts.eye ? '-eye' : '') + (G ? '-garment' : '') + '-' + detail + detailScale;
   return m;
 }
 
@@ -222,27 +249,31 @@ class HumanBody {
     this.mats = [];
     const M = this.meshes, d = dress;
     const mat = (mesh, plain, opts) => { if (!mesh) return null; const m = humanMaterial(mesh.material.map, plain, opts); mesh.material = m; this.mats.push(m); return m; };
-    const set = (m, lo, hi) => { if (!m) return; m.userData.lo.set(lo); m.userData.hi.set(hi === undefined ? lo : hi); };
+    const set = (m, lo, hi) => {
+      if (!m) return;
+      m.userData.lo.set(lo); m.userData.hi.set(hi === undefined ? lo : hi);
+      if (m.userData.sheenTint) m.sheenColor.copy(m.userData.lo).multiplyScalar(0.55);     // the sheen in the cloth's own colour
+    };
     // the skin texture is a light one: tint it towards the character's tone (the second lightest tone is the texture as it is)
     const tone = new THREE.Color(d.skin), ref = new THREE.Color(0xe0b48c);
     const skinTint = new THREE.Color(Math.min(1.25, tone.r / ref.r), Math.min(1.25, tone.g / ref.g), Math.min(1.25, tone.b / ref.b));
-    const skin = mat(M.body, true, { rough: 0.62 });
+    const skin = mat(M.body, true, { rough: 0.62, skin: true });
     skin.userData.lo.copy(skinTint); skin.userData.hi.copy(skinTint);
     const suitKey = Object.keys(M).find((k) => /casualsuit/.test(k)), shoeKey = Object.keys(M).find((k) => /^shoes/.test(k));
-    const suit = mat(M[suitKey], false, { rough: 0.92 });
+    const suit = mat(M[suitKey], false, { rough: 0.92, cloth: true });
     set(suit, d.trousers, d.shirt);
     // what of the suit is worn: no shirt for a bare chest, no trousers under a kilt; the skin beneath shows instead
     suit.userData.u.uCut.value.set(d.bareLegs ? 1 : 0, d.bareTop ? 1 : 0);
     skin.userData.u.uCut.value.set(d.bareLegs ? 0 : 1, d.bareTop ? 0 : 1);
-    set(mat(M[shoeKey], false, { rough: 0.7 }), d.shoes);
+    set(mat(M[shoeKey], false, { rough: 0.7, leather: true }), d.shoes);
     for (const k of ['low-poly']) mat(M[k], true, { rough: 0.25, eye: true });
-    for (const k of ['eyebrow001', 'eyelashes01']) set(mat(M[k], false, { alphaTest: 0.4, double: true }), d.hair);
+    for (const k of ['eyebrow001', 'eyelashes01']) set(mat(M[k], false, { alphaTest: 0.4, double: true, hair: true }), d.hair);
     const style = HUMAN_HAIR[d.hairStyle] || null;
     for (const h of Object.values(HUMAN_HAIR)) {
       const mesh = M[h];
       if (!mesh) continue;
       mesh.visible = !d.noHair && h === style;
-      if (mesh.visible) set(mat(mesh, false, { alphaTest: 0.45, double: true, rough: 0.55 }), d.hair);
+      if (mesh.visible) set(mat(mesh, false, { alphaTest: 0.45, double: true, rough: 0.55, hair: true }), d.hair);
     }
     // the garments: one skirt, the belt over it, a hood or a headcloth, a cloak, a beard (all hidden unless worn)
     const W = d.wear || {};
@@ -250,7 +281,8 @@ class HumanBody {
       const mesh = M[key];
       if (!mesh) return;
       mesh.visible = color !== undefined && color !== null;
-      if (mesh.visible) set(mat(mesh, false, { garment: true, double: true, rough: 0.95 }), color, trim === undefined ? color : trim);
+      const leather = /boots|bracers|kit|belt/.test(key);
+      if (mesh.visible) set(mat(mesh, false, leather ? { garment: true, double: true, rough: 0.6, leather: true } : { garment: true, double: true, rough: 0.95 }), color, trim === undefined ? color : trim);
     };
     for (const k of Object.keys(M)) if (/^garment_/.test(k)) M[k].visible = false;
     if (W.robe) wear(HUMAN_SKIRTS[W.robe], W.robeColor, W.trim);
@@ -259,10 +291,15 @@ class HumanBody {
     else if (W.scarf !== undefined) wear('garment_scarf', W.scarf);
     if (W.cloak !== undefined) wear('garment_cloak', W.cloak, W.trim);
     if (W.collar !== undefined) wear('garment_collar', W.collar, W.collarStripe);
+    if (W.sash !== undefined) wear('garment_sash', W.sash);
+    // the accents (High and up): boots, bracers, the buckle and pouches on the belt
+    if (W.boots !== undefined) wear('garment_boots', W.boots, W.bootsTrim);
+    if (W.bracers !== undefined) wear('garment_bracers', W.bracers, W.bracersTrim);
+    if (W.kit !== undefined) wear('garment_kit', W.kit, 0xc89a48);
     if (W.beard !== undefined && M.garment_beard) {
       const hairMap = M.short02 && M.short02.material.map;
       M.garment_beard.visible = true;
-      const bm = humanMaterial(hairMap || M.garment_beard.material.map, false, { alphaTest: 0.35, double: true, rough: 0.6 });
+      const bm = humanMaterial(hairMap || M.garment_beard.material.map, false, { alphaTest: 0.35, double: true, rough: 0.6, hair: true });
       M.garment_beard.material = bm; this.mats.push(bm); set(bm, W.beard);
     }
     for (const mesh of Object.values(M)) mesh.layers.enable(SHADOW_LAYER);

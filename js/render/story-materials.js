@@ -30,7 +30,15 @@ function createStoryMaterials(atlas) {
     uShadowMatrix: { value: new THREE.Matrix4() },
     uShadowOn: { value: 0 },
     uShadowTexel: { value: 1 / 2048 },
+    // Epic: a second, wide map for the far land (render/shadow.js, slot 2); off until bound
+    uShadowMap2: { value: null },
+    uShadowMatrix2: { value: new THREE.Matrix4() },
+    uShadow2On: { value: 0 },
+    uShadowTexel2: { value: 1 / 4096 },
   };
+  shared.uShadowMap2.value = shared.uShadowMap.value;
+  // Epic: the sea mirrors the world (main.js draws the reflection from a mirrored camera into uReflect)
+  Object.assign(shared, { uReflect: { value: shared.uShadowMap.value }, uReflMatrix: { value: new THREE.Matrix4() }, uReflOn: { value: 0 }, uReflH: { value: 0 } });
 
   const common = `
     uniform vec3 uFogColor;
@@ -45,6 +53,10 @@ function createStoryMaterials(atlas) {
     uniform mat4 uShadowMatrix;
     uniform float uShadowOn;
     uniform float uShadowTexel;
+    uniform sampler2D uShadowMap2;
+    uniform mat4 uShadowMatrix2;
+    uniform float uShadow2On;
+    uniform float uShadowTexel2;
     float hash21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
     float vnoise(vec2 p) {
       vec2 i = floor(p), f = fract(p);
@@ -55,12 +67,29 @@ function createStoryMaterials(atlas) {
     /** 1 where the sun reaches this point, 0 in a shadow: 12 jittered taps over a disc a few texels wide, so the edges are soft; fades at the map's edge */
     float shadowAt(vec3 world, vec3 n) {
       if (uShadowOn < 0.01) return 1.0;
+      float rot = hash21(gl_FragCoord.xy) * 6.2832;
+      // the far land (Epic): the wide map, a coarser look-up
+      float base = 1.0;
+      if (uShadow2On > 0.01) {
+        vec4 fp = uShadowMatrix2 * vec4(world + n * 0.6, 1.0);
+        vec3 fc = fp.xyz * 0.5 + 0.5;
+        if (fc.z <= 1.0 && fc.z >= 0.0) {
+          vec2 f2 = min(fc.xy, 1.0 - fc.xy);
+          float fedge = smoothstep(0.0, 0.08, min(f2.x, f2.y));
+          float fl = 0.0, fz = fc.z - 0.0012;
+          for (int i = 0; i < 6; i++) {
+            float fi = float(i), a = fi * 2.39996 + rot, r = sqrt((fi + 0.5) / 6.0) * uShadowTexel2 * 1.8;
+            fl += step(fz, texture2D(uShadowMap2, fc.xy + vec2(cos(a), sin(a)) * r).r);
+          }
+          base = mix(1.0, fl / 6.0, fedge);
+        }
+      }
       vec4 sp = uShadowMatrix * vec4(world + n * 0.12, 1.0);
       vec3 sc = sp.xyz * 0.5 + 0.5;
-      if (sc.z > 1.0 || sc.z < 0.0) return 1.0;
+      if (sc.z > 1.0 || sc.z < 0.0) return mix(1.0, base, uShadowOn);
       vec2 e2 = min(sc.xy, 1.0 - sc.xy);
       float edge = smoothstep(0.0, 0.1, min(e2.x, e2.y));
-      float rot = hash21(gl_FragCoord.xy) * 6.2832;
+      if (edge <= 0.0) return mix(1.0, base, uShadowOn);
       float rad = uShadowTexel * 2.6, z = sc.z - 0.0008;
       float lit = 0.0;
       for (int i = 0; i < 12; i++) {
@@ -68,7 +97,7 @@ function createStoryMaterials(atlas) {
         float a = fi * 2.39996 + rot, r = sqrt((fi + 0.5) / 12.0) * rad;
         lit += step(z, texture2D(uShadowMap, sc.xy + vec2(cos(a), sin(a)) * r).r);
       }
-      return mix(1.0, lit / 12.0, edge * uShadowOn);
+      return mix(1.0, mix(base, lit / 12.0, edge), uShadowOn);
     }
     /** sun on the surface (less where shadowed) plus the sky above and the warm bounce from the ground below */
     vec3 lightAt(vec3 n, float occlusion, float sh) {
@@ -260,6 +289,11 @@ function createStoryMaterials(atlas) {
       vN = normal;
       vTex = tex;
       vec4 wp = modelMatrix * vec4(position, 1.0);
+      // grass sinks into the ground with distance (tex: along the blade, its height), so the far fields cost nothing
+      if (tex.z > 4.5) {
+        float far = smoothstep(42.0, 66.0, length(wp.xyz - cameraPosition));
+        wp.y -= tex.x * tex.y * far * 1.05;
+      }
       // wind: a slow swell across the land and a quicker flutter, stronger the further a vertex is out along its leaf or stalk
       float w = sin(uTime * 1.3 + wp.x * 0.23 + wp.z * 0.19) * 0.6 + sin(uTime * 2.7 + wp.x * 0.9 + wp.z * 0.6) * 0.25;
       wp.xz += vec2(0.8, 0.45) * w * sway * 0.22;
@@ -299,8 +333,8 @@ function createStoryMaterials(atlas) {
       vec3 n = normalize(vN);
       if (!gl_FrontFacing) n = -n;
       vec3 base = vColor;
-      float leaf = step(1.5, vTex.z) * (1.0 - step(3.5, vTex.z));
-      float cloth = step(3.5, vTex.z);
+      float leaf = step(1.5, vTex.z) * (1.0 - step(3.5, vTex.z)) + step(4.5, vTex.z) * 0.7;     // leaves, and grass: thin, the sun shines through
+      float cloth = step(3.5, vTex.z) * (1.0 - step(4.5, vTex.z));
       if (cloth > 0.5) {
         // linen awnings and blankets: indigo stripes woven in, the weave and a little dust
         float sp = vTex.x * 4.0;
@@ -309,6 +343,9 @@ function createStoryMaterials(atlas) {
         vec3 dye = vec3(0.16, 0.3, 0.55);
         base = mix(base, dye, band * (1.0 - st * 0.5));
         base *= 0.9 + 0.1 * vnoise(vWorld.xz * 40.0 + vWorld.y * 17.0);
+      } else if (vTex.z > 4.5) {
+        // grass: shaded down at its foot among the other blades, catching the light at its tip
+        base *= 0.55 + 0.45 * smoothstep(0.0, 0.8, vTex.x);
       } else if (vTex.z > 2.5) {
         // ivy leaves: each its own shade
         base *= 0.85 + 0.3 * hash21(floor(vWorld.xz * 9.0) + floor(vWorld.y * 9.0));
@@ -367,6 +404,10 @@ function createStoryMaterials(atlas) {
   // land it is hidden by the ground; past the loaded chunks it carries the sea on to the horizon.
   const waterFragment = `
     uniform float uAlpha;
+    uniform sampler2D uReflect;
+    uniform mat4 uReflMatrix;
+    uniform float uReflOn;
+    uniform float uReflH;
     #ifdef OCEAN
     uniform vec2 uCam;
     #endif
@@ -399,11 +440,23 @@ function createStoryMaterials(atlas) {
       // the sea's haze is much longer than the land's, so the water runs out to the horizon instead of into a wall of fog
       vec3 V2 = normalize(vWorld - cameraPosition);
       vec3 fogc = uFogColor + uSunColor * pow(max(dot(V2, uSunDir), 0.0), 6.0) * 0.3;
-      vec3 c = mix(tone(rgb), fogc, 1.0 - exp(-depth * 0.0028));
+      vec3 tc = tone(rgb);
+      float reflA = 0.0;                                  // a mirroring surface hides more of the floor under it
+      // Epic: the world mirrored in the sea, bent by the ripples, stronger at a grazing angle (the sun's glint stays on top)
+      if (uReflOn > 0.5 && abs(vWorld.y - uReflH) < 1.2) {           // the sea (the far ocean plane lies a block lower)
+        vec4 rc = uReflMatrix * vec4(vWorld, 1.0);
+        vec2 ruv = clamp(rc.xy / rc.w + n.xz * 0.012, 0.001, 0.999);
+        vec3 refl = texture2D(uReflect, ruv).rgb;
+        vec3 glint = uSunColor * pow(max(dot(n, H), 0.0), 90.0) * 1.4;
+        tc = mix(tc, refl * vec3(0.88, 0.95, 0.98) + glint * 0.6, 0.32 + 0.6 * fres);
+        reflA = 0.88;
+        if (uReflOn > 1.5) { tc = refl; reflA = 1.0; }                 // debugging: the reflection alone
+      }
+      vec3 c = mix(tc, fogc, 1.0 - exp(-depth * 0.0028));
       #ifdef OCEAN
-      gl_FragColor = vec4(c, mix(uAlpha, 0.96, fres) * ramp);
+      gl_FragColor = vec4(c, max(mix(uAlpha, 0.96, fres), reflA) * ramp);
       #else
-      gl_FragColor = vec4(c, mix(uAlpha, 0.96, fres));
+      gl_FragColor = vec4(c, max(mix(uAlpha, 0.96, fres), reflA));
       #endif
     }`;
 

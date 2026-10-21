@@ -36,6 +36,7 @@ class Chunk {
     this.meshWater = null;
     this.meshGround = null;            // story mode: the smooth ground skin
     this.meshProps = null;             // story mode: palms and reeds
+    this.meshGrass = null;             // story mode, Epic: grass (no shadows of its own)
   }
 }
 
@@ -143,6 +144,15 @@ class World {
     }
     list.sort((a, b) => a.d2 - b.d2);
     this.offsets = list;
+  }
+
+  /** Story, Epic: grass in the fields (0 none, 1 sparse, 2 full). The chunks are meshed again with it. */
+  setGrass(level) {
+    level = this.story ? level | 0 : 0;
+    if (level === (this.grass || 0)) return;
+    this.grass = level;
+    for (const w of this.workers) w.postMessage({ type: 'grass', level });
+    for (const ch of this.chunks.values()) if (ch.meshRequested) this._markDirtyAt(ch.cx, ch.cz);
   }
 
   setRenderDistance(rd) { this.rd = rd; this._buildOffsets(); this.lastCenters = ''; }
@@ -321,6 +331,7 @@ class World {
     ch.meshWater = this._makeMesh(ch, res.water, this.materials.water, 1);
     ch.meshGround = res.ground ? this._makeGround(ch, res.ground, this.materials.ground) : null;
     ch.meshProps = res.props ? this._makeProps(ch, res.props, this.materials.prop) : null;
+    ch.meshGrass = res.grass ? this._makeProps(ch, res.grass, this.materials.prop, true) : null;
     ch.meshState = MeshState.DONE;
   }
 
@@ -366,7 +377,7 @@ class World {
   }
 
   /** Story mode's palms and reeds: position, normal, colour and how much each vertex sways in the wind. */
-  _makeProps(ch, m, material) {
+  _makeProps(ch, m, material, grass) {
     if (!m.index.length) return null;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
@@ -381,13 +392,13 @@ class World {
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
     mesh.renderOrder = 0;
-    mesh.layers.enable(PROP_SHADOW_LAYER);          // casts with its own depth material, so the leaflets' gaps let the sun through
+    if (!grass) mesh.layers.enable(PROP_SHADOW_LAYER);          // casts with its own depth material, so the leaflets' gaps let the sun through (grass does not cast)
     this.scene.add(mesh);
     return mesh;
   }
 
   _disposeMeshes(ch) {
-    for (const k of ['meshOpaque', 'meshWater', 'meshGround', 'meshProps']) {
+    for (const k of ['meshOpaque', 'meshWater', 'meshGround', 'meshProps', 'meshGrass']) {
       if (ch[k]) { this.scene.remove(ch[k]); ch[k].geometry.dispose(); ch[k] = null; }
     }
   }

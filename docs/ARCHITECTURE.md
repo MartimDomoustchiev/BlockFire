@@ -581,6 +581,53 @@ times an M1's GPU; it was not measured. Software WebGL (the tests) picks High on
   bed (a linen mattress, a striped blanket over it). Cloth set into a floor (a carpet) stays a cube. Prop blocks do not
   hide their neighbours' faces (`asProp`). The ruined chapel's walls are all dressed stone now (NET.VERSION 11).
 
+## 25. Epic: the newest desktop cards
+
+Auto picks Epic for a Radeon RX 6600 and up, any GeForce RTX and Arc B-series / A7xx (`GpuTier.pick`); older desktop
+cards keep Ultra. Epic is Ultra plus:
+
+- **Ambient occlusion** (`PostFX.afterWorld`, `mAO`, `mAOBlur`): the scene target gets a depth texture (the multisampled
+  depth is resolved into it). Right after a view draws the world, before the first-person hands (which clear the depth),
+  its depth is turned back into positions; each pixel gathers 16 taps in a spiral within 0.9 blocks round its normal.
+  Half resolution, a two-pass blur that does not cross depth edges, faded out from 45 to 110 blocks; the final pass
+  darkens the picture with it (a little less in the brightest sun), never the hands. `__post().opts.ao = 9` shows it alone.
+- **A second shadow map** (`SunShadow(size, extent, 2)`, `uShadowMap2`): 4096 over 340 blocks, redrawn after 14 blocks of
+  movement or 45 frames. `shadowAt` uses the sharp map near the viewer and fades into the wide one beyond it, so far
+  hills, towers and palm groves cast shadows too.
+- **The sea mirrors the world** (`renderReflection` in main.js): per view, the scene from the camera mirrored in the sea's
+  surface (`SEA_LEVEL + 0.875`; the water hidden, an oblique near plane clipping what is under the surface) into a target
+  at 0.6 of the view's resolution; the water shader projects into it (`uReflMatrix`), bends it a little with the ripples
+  and mixes it in by Fresnel, making mirroring water more opaque. Water at other heights (wells, high streams) keeps the
+  sky's reflection. `__refl().debug = true` shows the reflection alone.
+- **Grass** (`emitGrass` in the mesher, `World.setGrass`): blades on the green fields (20 per column) and dry tufts on a
+  few sand columns, standing on the ground skin (its height from the column's corner heights), curving and swaying (prop
+  kind 5), shaded from the foot to the tip; they sink into the ground from 42 to 66 blocks away. Their own mesh per chunk
+  (`meshGrass`), not in the shadow pass. Changing the preset meshes the chunks again.
+- **2x supersampling**, 16 chunks of view; auto resolution steps down to 0.75 of that when a frame takes over ~8.5 ms.
+
+**Measured** on the M1 laptop (Metal, 1920x1080, story at the hideout, auto resolution off): Ultra 52 fps, Epic 23 fps.
+The user's Radeon RX 9060 XT ran Ultra at about 600 fps.
+
+## 26. People in the land's light, real weapons and the outfit's accents
+
+- **One light for people and land** (`render/char-shading.js`, `CharShading`): in story mode `CharacterLights` follows the
+  story's sun (direction, colour, the moon at night) and its sky and ground light, and the day colour is no longer
+  multiplied in a second time. Every person's and weapon's material calls `CharShading.inject` from its onBeforeCompile:
+  the sun's shadow map darkens their direct light (8 taps; someone in a wall's shade is in the shade), the land's tone
+  curve finishes their colour, and an environment light drawn from the story's colours (sky, haze, sand, the sun; a PMREM
+  target redrawn when the light changes) gives metal something to reflect. `main.js` calls `sync()` once a frame.
+- **Levels of detail** (`HumanModels.tier`, set from the preset): Medium 0; High 1 adds a fine relief made in the shader
+  (pores, the slub of cloth, grain of leather and wood, hammer marks on metal), faded out where it would be finer than a
+  pixel; Ultra and Epic 2 use physical materials: skin with a reddish sheen and a little warm light under it, a soft sheen
+  on cloth and hair in their own colours, wet eyes (clear coat), hair and lashes anti-aliased through the multisampling.
+- **Weapons** (`render/weapons.js`, `WeaponModels.make`): lofted from cross-sections. The Order's sword (diamond blade with a
+  fuller, bowed guard, spiral leather grip, wheel pommel; steel, brass, leather), the enforcers' khopesh (bronze), a
+  composite recurve bow (wood, sinew back, horn tips, leather grip), a scabbard with the sheathed hilt, a quiver of
+  fletched arrows. The first-person view uses the same models without the world's shadow (`fp`).
+- **Accents** (High and up; `tools/humans/garments.py`): knee boots with a folded cuff and straps, laced bracers, a brass
+  buckle and two pouches on the belt, all skinned; the Order and the player carry a scabbard on the left hip (the hilt
+  hides while the sword is drawn) and the Order a quiver across the back.
+
 ## 19. Engine boundaries (what a reusable engine would take)
 
 Not extracted yet. Generic parts (no BLOCKFIRE rules in them): `core/` (fixed-step `Game`, events, rng), `world/`

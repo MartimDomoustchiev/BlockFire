@@ -197,6 +197,8 @@ class PlayerView {
       renderer.setScissor(r.x, r.y, r.w, r.h);
     }
     renderer.render(scene, this.camera);
-    if (this.character && !this.spectate && !this.tp) this.viewmodel.render(renderer);
+    const hands = !!(this.character && !this.spectate && !this.tp);
+    if (post) post.afterWorld(this, hands);           // Epic: ambient occlusion from the world's depth, before the hands
+    if (hands) this.viewmodel.render(renderer);
   }
 }

@@ -197,10 +197,49 @@ const RENDER_TESTS = {
     });
     ctx.assert(g.hood && g.cloak && g.beard && g.skirts === 0 && g.hair === 0 && g.garb, 'the hood, the cloak and the beard are worn, no skirt, no hair under the hood: ' + JSON.stringify(g));
     ctx.assert(g.turn > 0.4, 'the cloak swings with the rig\'s cape: ' + JSON.stringify(g));
+    // High and up: the accents (boots, bracers, the belt's buckle and pouches, a scabbard); real swords and a bow
+    const acc = await page.evaluate(() => {
+      const M = __lobby.model, H = M.human, vis = (k) => !!(H.meshes[k] && H.meshes[k].visible);
+      const metal = M.swords.longsword.children.filter((c) => c.material && c.material.metalness === 1).length;
+      return { tier: HumanModels.tier, boots: vis('garment_boots'), bracers: vis('garment_bracers'), kit: vis('garment_kit'), scabbard: !!M.scabbard,
+        swordParts: M.swords.longsword.children.length, metal, bow: M.bow.group.children[0].children.length };
+    });
+    ctx.assert(acc.tier >= 1 && acc.boots && acc.bracers && acc.kit && acc.scabbard, 'boots, bracers, a belt with a buckle and pouches, a scabbard: ' + JSON.stringify(acc));
+    ctx.assert(acc.swordParts >= 5 && acc.metal >= 3 && acc.bow >= 5, 'the sword is blade, guard, grip and pommel in metal and leather; the bow is in parts: ' + JSON.stringify(acc));
     // the setting off: the drawn body again (software rendering keeps it by default)
     const { page: p2 } = await ctx.open('', { waitReady: false });
     await p2.waitForFunction(() => window.__lobby && __lobby.model, null, { timeout: 60000 });
     ctx.assert(await p2.evaluate(() => !__lobby.model.human && HumanModels.enabled === false), 'software rendering draws the bodies');
+  },
+
+  'epic: ambient occlusion, a second shadow map for the far land, the sea mirroring the world and grass in the fields': async (ctx) => {
+    const { page } = await ctx.open('autostart=1&mode=story&seed=kestrel-isle&rd=4&quality=epic', { waitReady: false, viewport: { width: 640, height: 400 } });
+    await page.waitForFunction(() => window.__game && window.__game.world && window.__game.world.stats().meshed >= 25 && document.getElementById('loading').style.display === 'none', null, { timeout: 240000 });
+    // somewhere over the sea, looking at the shore, so the reflection is drawn
+    await page.evaluate(() => { const g = __game, v = g.story.places.V1, R = CONFIG.STORY.ISLAND_RADIUS, a = Math.atan2(v.z, v.x); g.paused = true; g.player.teleport(Math.cos(a) * (R + 6), CONFIG.SEA_LEVEL + 4, Math.sin(a) * (R + 6)); g.player.yaw = Math.atan2(Math.cos(a), Math.sin(a)); g.timeOfDay = 0.45; });
+    await page.waitForFunction(() => __game.world.isAreaMeshed(Math.floor(__game.player.pos.x / 16), Math.floor(__game.player.pos.z / 16), 1), null, { timeout: 120000 });
+    await page.waitForTimeout(2500);
+    const r = await page.evaluate(() => {
+      const gl = document.getElementById('gl').getContext('webgl2'), S = __game.world.materials.shared, P = __post();
+      let grass = 0, chunks = 0;
+      for (const ch of __game.world.chunks.values()) { if (ch.meshGrass) { grass += ch.meshGrass.geometry.index.count / 3; chunks++; } }
+      return { gfx: __gfx(), err: gl.getError(), ao: P.opts.ao, depth: !!P.scene.depthTexture, far: S.uShadowMap2.value !== S.uShadowMap.value, farOn: S.uShadow2On.value,
+        refl: S.uReflOn.value, reflRt: !!(__refl().rts[0] && __refl().rts[0].width > 0), grass, chunks };
+    });
+    ctx.assert(r.gfx.quality === 'epic' && r.gfx.post && r.gfx.ratio >= 1, 'Epic draws through the post-processing: ' + JSON.stringify(r.gfx));
+    ctx.assert(r.ao > 0 && r.depth, 'ambient occlusion reads the scene\'s depth: ' + JSON.stringify(r));
+    ctx.assert(r.far && r.farOn > 0, 'a second, wide shadow map for the far land: ' + JSON.stringify(r));
+    ctx.assert(r.refl > 0.5 && r.reflRt, 'the sea mirrors the world: ' + JSON.stringify(r));
+    ctx.assert(r.grass > 1000 && r.chunks > 0, 'grass grows in the fields: ' + JSON.stringify(r));
+    ctx.assert(r.err === 0, 'no GL errors: ' + JSON.stringify(r));
+    const png = await page.screenshot();
+    const stats = await page.evaluate((b64) => new Promise((res) => {
+      const img = new Image();
+      img.onload = () => { const c = document.createElement('canvas'); c.width = 64; c.height = 40; const x = c.getContext('2d'); x.drawImage(img, 0, 0, 64, 40); const d = x.getImageData(0, 0, 64, 40).data; let lo = 255, hi = 0; for (let i = 0; i < d.length; i += 4) { const l = (d[i] + d[i + 1] + d[i + 2]) / 3; lo = Math.min(lo, l); hi = Math.max(hi, l); } res({ lo, hi }); };
+      img.src = 'data:image/png;base64,' + b64;
+    }), png.toString('base64'));
+    ctx.assert(stats.hi - stats.lo > 40, 'a picture, not a flat colour: ' + JSON.stringify(stats));
+    await ctx.screenshot(page, 'story-epic');
   },
 
   'ultra: a desktop graphics card gets Ultra on auto; the post-processed story frame has its shadows, clouds and a picture': async (ctx) => {
@@ -215,9 +254,11 @@ const RENDER_TESTS = {
       GpuTier.pick('ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)', false),
       GpuTier.pick('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0)), SwiftShader driver)', false),
       GpuTier.pick('Adreno (TM) 740', true),
+      GpuTier.pick('ANGLE (AMD, Radeon RX 580 Series Direct3D11 vs_5_0 ps_5_0, D3D11)', false),
+      GpuTier.pick('ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)', false),
     ]);
-    ctx.assert(JSON.stringify(picks) === JSON.stringify(['ultra', 'ultra', 'high', 'high', 'high', 'high', 'medium']),
-      'auto: ultra for desktop cards (Radeon RX, GeForce RTX), high for built-in graphics and software, medium on touch: ' + JSON.stringify(picks));
+    ctx.assert(JSON.stringify(picks) === JSON.stringify(['epic', 'epic', 'high', 'high', 'high', 'high', 'medium', 'ultra', 'ultra']),
+      'auto: epic for the newest desktop cards (Radeon RX 6600 and up, GeForce RTX), ultra for older desktop cards, high for built-in graphics and software, medium on touch: ' + JSON.stringify(picks));
     const r = await page.evaluate(() => {
       const gl = document.getElementById('gl').getContext('webgl2');
       return { gfx: __gfx(), err: gl.getError(), aniso: __game.world.materials.shared.uAniso.value, sun: !!__game.world.scene.children.find((c) => c.material && c.material.uniforms && c.material.uniforms.uClouds) };

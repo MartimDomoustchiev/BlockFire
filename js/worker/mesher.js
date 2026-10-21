@@ -29,12 +29,13 @@ WorkerBundle.add(function mesherPart() {
   const CU = [0, 1, 1, 0], CV = [0, 0, 1, 1];
 
   let OPAQUE, LIQUID, FACE_TILES, WATER_TILE;
-  let SMOOTH = false, GROUND = null, GCOL = null, PROP = null;
+  let SMOOTH = false, GROUND = null, GCOL = null, PROP = null, GRASS = 0, GRASS_ID = -1, SAND_ID = -1;
   function setupMesher(tables, smooth) {
     OPAQUE = tables.opaque; LIQUID = tables.liquid;
     FACE_TILES = tables.faceTiles; WATER_TILE = tables.waterTile;
     SMOOTH = !!smooth && !!tables.ground;
     GROUND = tables.ground; GCOL = tables.groundColor; PROP = tables.prop;      // 1 = natural ground, 2 = a prop that stands on it (trunks, leaves, hay, bushes)
+    GRASS_ID = tables.grassId === undefined ? -1 : tables.grassId; SAND_ID = tables.sandId === undefined ? -1 : tables.sandId;
     P.fill(0);
   }
 
@@ -415,6 +416,59 @@ WorkerBundle.add(function mesherPart() {
     if (openZ1) clothQuad(G, [x1, bt, z1 + 0.012], [x0, bt, z1 + 0.012], [x0, drop, z1 + 0.012], [x1, drop, z1 + 0.012], wx + 1, wx, col, sw);
   }
 
+  /** Story, Epic: how much grass grows (0 none, 1 sparse, 2 the fields full of it). Chunks meshed after this have it. */
+  function setGrass(level) { GRASS = level | 0; }
+
+  /**
+   * Grass: blades on the green fields and dry tufts here and there on the sand, standing on the ground skin (its height
+   * at the blade's foot from the column's corner heights), each a tapered, curving strip that bends in the wind. tex:
+   * (along 0..1, the blade's height, kind 5): the prop shader shades it from the shaded foot to a sunlit tip and sinks
+   * it into the ground far away.
+   */
+  function emitGrass(c, cx, cz) {
+    const G = newProps();
+    const blade = (px, py, pz, h, lean, ang, w, c0, c1) => {
+      const dx = Math.cos(ang), dz = Math.sin(ang), sx = -dz, sz = dx;          // leaning towards (dx, dz), flat across (sx, sz)
+      let prev = null;
+      for (let i = 0; i <= 3; i++) {
+        const t = i / 3, x = px + dx * lean * t * t, z = pz + dz * lean * t * t, y = py + h * t, hw = w * (1 - t * 0.92);
+        const n = nrm(dx * 0.6, 1, dz * 0.6);
+        const r = c0[0] + (c1[0] - c0[0]) * t, g = c0[1] + (c1[1] - c0[1]) * t, b = c0[2] + (c1[2] - c0[2]) * t, sw = t * t * h * 0.9;
+        const L = pvert(G, x + sx * hw, y, z + sz * hw, n[0], n[1], n[2], r, g, b, sw, t, h, 5);
+        const R = pvert(G, x - sx * hw, y, z - sz * hw, n[0], n[1], n[2], r, g, b, sw, t, h, 5);
+        if (prev) G.index.push(prev[0], L, prev[1], prev[1], L, R);
+        prev = [L, R];
+      }
+    };
+    for (let z = 0; z < 16; z++) {
+      for (let x = 0; x < 16; x++) {
+        const top = colTop(x, z);
+        if (top < 0 || top >= 62) continue;
+        const id = TOPID[(z + 2) * CW + x + 2], above = c[x + z * 16 + (top + 1) * 256];
+        if (above !== 0 && !PROP[above]) continue;                       // built over (a floor, a wall): no grass
+        const wx = cx * 16 + x, wz = cz * 16 + z, r = rngOf(hashOf(wx, top, wz) ^ 0x5bd1e995);
+        let n = 0, dry = false;
+        if (id === GRASS_ID) n = GRASS === 2 ? 20 : 7;
+        else if (id === SAND_ID && r() < 0.05 * GRASS) { n = 7; dry = true; }
+        if (!n) continue;
+        const h00 = cornerHeight(x, z, 2), h10 = cornerHeight(x + 1, z, 3), h11 = cornerHeight(x + 1, z + 1, 0), h01 = cornerHeight(x, z + 1, 1);
+        if (Math.max(h00, h10, h11, h01) - Math.min(h00, h10, h11, h01) > 1.2) continue;      // a cliff edge
+        const tx = r(), tz = r();
+        for (let k = 0; k < n; k++) {
+          // a tuft of dry grass keeps together; field grass is everywhere
+          const u = dry ? tx * 0.6 + 0.2 + (r() - 0.5) * 0.25 : r(), v = dry ? tz * 0.6 + 0.2 + (r() - 0.5) * 0.25 : r();
+          const hy = h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h11 * u * v + h01 * (1 - u) * v;
+          const k2 = 0.8 + r() * 0.4, ang = r() * Math.PI * 2;
+          const c0 = dry ? [0.36 * k2, 0.32 * k2, 0.2 * k2] : [0.16 * k2, 0.27 * k2, 0.08 * k2];
+          const c1 = dry ? [0.78 * k2, 0.69 * k2, 0.44 * k2] : (r() < 0.25 ? [0.62 * k2, 0.6 * k2, 0.3 * k2] : [0.42 * k2, 0.56 * k2, 0.2 * k2]);
+          const h = dry ? 0.25 + r() * 0.3 : 0.22 + r() * 0.38;
+          blade(x + u, hy - 0.04, z + v, h, h * (0.25 + r() * 0.45), ang, 0.018 + r() * 0.016, c0, c1);
+        }
+      }
+    }
+    return G;
+  }
+
   function propsOf(c, cx, cz) {
     const G = newProps();
     for (let z = 0; z < 16; z++) {
@@ -657,6 +711,7 @@ WorkerBundle.add(function mesherPart() {
     if (SMOOTH) {
       const G = newGround(); emitGround(G); out.ground = packGround(G);
       out.props = packProps(propsOf(nb[4], cx | 0, cz | 0));
+      if (GRASS > 0) out.grass = packProps(emitGrass(nb[4], cx | 0, cz | 0));
     }
     return out;
   }

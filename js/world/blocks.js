@@ -112,6 +112,7 @@ const BlockTables = (function () {
   };
   for (const id of Object.keys(GROUND_COLORS)) { t.ground[id] = 1; t.groundColor.set(GROUND_COLORS[id], id * 3); }
   for (const id of [BLOCK.WOOD, BLOCK.LEAVES, BLOCK.CACTUS, BLOCK.BUSH, BLOCK.HAY, BLOCK.PALM]) t.ground[id] = 2;
+  t.grassId = BLOCK.GRASS; t.sandId = BLOCK.SAND;                 // story, Epic: where grass grows (worker/mesher.js)
   t.prop[BLOCK.PALM] = 1; t.prop[BLOCK.BUSH] = 2; t.prop[BLOCK.LEAVES] = 3; t.prop[BLOCK.CLOTH] = 4;
   BLOCK_DEFS.forEach((d, id) => {
     if (!d) return;

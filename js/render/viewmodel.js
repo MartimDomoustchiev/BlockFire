@@ -73,6 +73,8 @@ class ViewModel {
     this.flashMesh.visible = false;
     CharacterLights.install(this.scene);
     this.armMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    this.armMat.onBeforeCompile = (sh) => CharShading.inject(sh, { shadow: false });     // story: the land's tone
+    this.armMat.customProgramCacheKey = () => 'vm-arm';
     this.outfitKey = null;
     this.armGeo = null;
     this._q = new THREE.Quaternion(); this._m = new THREE.Matrix4(); this._v = new THREE.Vector3();
@@ -317,7 +319,7 @@ class ViewModel {
   /** The bow upright and canted in the left hand; the right hand rides the string as it's drawn. */
   _bowModel() {
     const g = new THREE.Group();
-    const rig = new BowRig(this.armMat);
+    const rig = new BowRig(this.armMat, true);
     rig.strMat.userData.base = new THREE.Color(0xe8e4d4);
     this.mats.push(rig.strMat);
     rig.group.rotation.set(0, -0.06, 0.3);
@@ -336,7 +338,7 @@ class ViewModel {
    */
   _swordModel(id) {
     const g = new THREE.Group(), s = new THREE.Group();
-    s.add(new THREE.Mesh(WeaponGeometry.get(id), this.armMat));
+    s.add(WeaponModels.make(id, { fp: true }));
     const arm = this._arm(s, 1, [0, 0, 0.02], 'knife', [0.3, -0.62, 0.72]);
     s.remove(arm.fore); g.add(arm.fore);
     arm.fore.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0.3, -0.62, 0.72).normalize());

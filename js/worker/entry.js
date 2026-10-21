@@ -9,7 +9,7 @@ WorkerBundle.add(function entryPart() {
       if (layer.edge) out.push(layer.edge.buffer);
     }
     if (res.ground) out.push(res.ground.pos.buffer, res.ground.normal.buffer, res.ground.color.buffer, res.ground.index.buffer);
-    if (res.props) out.push(res.props.pos.buffer, res.props.normal.buffer, res.props.color.buffer, res.props.sway.buffer, res.props.tex.buffer, res.props.index.buffer);
+    for (const P of [res.props, res.grass]) if (P) out.push(P.pos.buffer, P.normal.buffer, P.color.buffer, P.sway.buffer, P.tex.buffer, P.index.buffer);
     return out;
   }
   self.onmessage = function (e) {
@@ -19,6 +19,9 @@ WorkerBundle.add(function entryPart() {
         BEDROCK = m.ids.BEDROCK;
         setupTerrain(m.ids, m.sea, m.seed, m.cfg);
         setupMesher(m.tables, m.smooth);
+        break;
+      case 'grass':
+        setGrass(m.level);
         break;
       case 'gen': {
         const data = generateChunk(m.cx, m.cz);
