@@ -58,6 +58,10 @@ exports.tests = {
   'storm: phases shrink inside each other, damage once per second straight to health': async (ctx) => {
     const page = await battle(ctx, 'autostart=1&seed=isle3&rd=4&mode=battle&bots=0');
     const r = await page.evaluate(() => {
+      // (a match always has at least one bot: this one stands still and is kept alive like the observer, so neither the
+      // storm nor a fight ends the match before the storm has closed)
+      const bots = T.m.participants.filter((c) => c.isBot);
+      for (const b of bots) b.controller = new ScriptedController(() => ({}));
       const s = T.m.storm, out = { circles: [] };
       const P = CONFIG.STORM.PHASES;
       let total = 0;
@@ -65,6 +69,7 @@ exports.tests = {
       let prev = { x: s.cur.x, z: s.cur.z, r: s.cur.r }, nested = true;
       for (let t = 0; t < total + 5; t++) {
         T.p.health = 100; T.p.alive = true;            // keep the observer alive
+        for (const b of bots) { b.health = 100; b.alive = true; }
         T.tick(60);
         if (s.cur.r < prev.r - 1e-6) {
           if (Math.hypot(s.cur.x - prev.x, s.cur.z - prev.z) + s.cur.r > prev.r + 1e-6) nested = false;
@@ -108,6 +113,45 @@ exports.tests = {
     ctx.assert(r.shots > 5, 'bot fired: ' + JSON.stringify(r));
     ctx.assert(r.delay >= CONFIG_HARD_REACTION * 0.75, 'waited its reaction time first: ' + r.delay.toFixed(2));
     ctx.assert(r.dmg > 30 || !r.alive, 'and hit: ' + JSON.stringify(r));
+  },
+
+  'bot brain: reloads behind cover instead of in the open, and goes after gunfire it cannot see': async (ctx) => {
+    const page = await battle(ctx, 'autostart=1&seed=isle4&rd=4&mode=battle&bots=1&difficulty=hard');
+    const r = await page.evaluate(() => {
+      const bot = T.m.participants.find((c) => c.isBot);
+      const list = [];
+      for (let x = -24; x <= 24; x++) for (let z = -24; z <= 24; z++) { list.push([x, 55, z, BLOCK.STONE]); for (let y = 56; y <= 60; y++) list.push([x, y, z, BLOCK.AIR]); }
+      for (let x = -3; x <= 3; x++) for (let y = 56; y <= 58; y++) list.push([x, y, 4, BLOCK.STONE]);          // a wall between us
+      T.g.world.setBlocks(list);
+      for (const c of T.m.participants) { c.gliding = false; c.flying = false; }
+      T.p.revive(); T.p.gliding = false; T.p.teleport(0.5, 56, -12.5);
+      // 1. the bot beside the wall, in the open, its gun empty: it should get behind the wall to reload
+      bot.teleport(6.5, 56, 8.5);
+      bot.inventory.clear(); const gun = makeWeapon('ar', 2); gun.data.mag = 0; bot.inventory.set(0, gun); bot.inventory.add(makeStack('ammo_medium', 200)); bot.selectSlot(0);
+      // (it peeks out again once it has reloaded: look while the reload is running)
+      const seenFrom = () => {
+        const eye = T.p.eyePos(new THREE.Vector3()), head = new THREE.Vector3(bot.pos.x, bot.pos.y + 1.5, bot.pos.z);
+        const dir = head.clone().sub(eye), L = dir.length(); dir.divideScalar(L);
+        const hit = raycastBlocks(T.g.world, eye, dir, L, { filter: BULLET_STOPS });
+        return !hit || hit.dist >= L - 0.6;
+      };
+      let hidden = false;
+      for (let i = 0; i < 40 && !hidden; i++) { T.sim(0.1); if (bot.reload && !seenFrom()) hidden = true; }
+      // 2. gunfire out of sight: a shot far off, behind the wall from the bot
+      bot.inventory.clear(); bot.inventory.set(0, makeWeapon('ar', 2)); bot.inventory.add(makeStack('ammo_medium', 200)); bot.selectSlot(0);
+      bot.teleport(0.5, 56, 16.5); T.p.teleport(0.5, 56, -20.5);
+      const box = [];
+      for (let x = -2; x <= 3; x++) for (let z = -23; z <= -18; z++) for (let y = 56; y <= 59; y++) if (x === -2 || x === 3 || z === -23 || z === -18 || y === 59) box.push([x, y, z, BLOCK.STONE]);
+      T.g.world.setBlocks(box);                                                               // the player boxed in: unseen
+      bot.controller.target = null; bot.controller.lastSeen = null; bot.controller.state = 'roam'; bot.controller.vis.clear(); bot.lastDamagedBy = null;
+      bot.controller.hearShot(T.g, bot);                                                       // (starts listening)
+      T.g.events.emit('shot', { character: T.p, cls: 'ar', origin: new THREE.Vector3(0.5, 57.5, -20.5), ends: [] });
+      bot.controller.think(T.g, bot);
+      const goal = bot.controller.goal;
+      return { hidden, moved: Math.hypot(bot.pos.x - 6.5, bot.pos.z - 8.5), state: bot.controller.state, toShot: goal ? Math.hypot(goal.x - 0.5, goal.z + 20.5) : -1 };
+    });
+    ctx.assert(r.hidden, 'the bot went behind the wall to reload: ' + JSON.stringify(r));
+    ctx.assert(r.state === 'hunt' && r.toShot >= 0 && r.toShot < 14, 'and went after the gunfire it heard (coming in from the side): ' + JSON.stringify(r));
   },
 
   'match end: last one standing wins, placements count down, results report stats': async (ctx) => {

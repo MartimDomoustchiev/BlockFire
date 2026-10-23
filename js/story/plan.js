@@ -14,6 +14,8 @@ class StoryPlan {
       else s.name = N[s.kind];
       s.key = s.name.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
     }
+    // the relics (worker/sites.js): each with the key of the site whose land it lies in ('wilds' out on the open island)
+    this.relics = (info.relics || []).map((r) => Object.assign({}, r, { area: r.area >= 0 && this.sites[r.area] ? this.sites[r.area].key : 'wilds' }));
     this.keep = this.sites.find((s) => s.kind === 'keep');
     this.hideout = this.sites.find((s) => s.kind === 'hideout');
     this.villages = this.sites.filter((s) => s.kind === 'village');
@@ -29,6 +31,10 @@ class StoryPlan {
   byKey(key) { return this.sites.find((s) => s.key === key) || null; }
 
   /** The site whose grounds contain (x, z), or null on the open island. */
+  siteAt(x, z) {
+    for (const s of this.sites) if (Math.hypot(s.x - x, s.z - z) <= s.flat + 8) return s;
+    return null;
+  }
 
   /** The viewpoint whose perch tip is within `r` blocks of p (standing on it), or null. */
   perchAt(p, r) {

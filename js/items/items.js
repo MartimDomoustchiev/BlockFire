@@ -66,6 +66,7 @@ defItem('letter', { kind: 'quest', name: 'Sealed Letter', maxStack: 1 });
 defItem('strongbox', { kind: 'quest', name: 'Strongbox', maxStack: 1 });
 defItem('toll_ticket', { kind: 'quest', name: 'Toll Ticket', maxStack: 1 });
 defItem('order_letter', { kind: 'quest', name: 'Order Letter', maxStack: 1 });
+defItem('relic', { kind: 'quest', name: 'Old Relic', maxStack: 1 });
 defItem('iron_crate', { kind: 'quest', name: 'Crate of Iron Bars', maxStack: 1 });
 defItem('ledger_page', { kind: 'quest', name: 'Torn Ledger Page', maxStack: 1 });
 defItem('pell_key', { kind: 'quest', name: "Pell's Key", maxStack: 1 });

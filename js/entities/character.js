@@ -342,7 +342,7 @@ class Character extends Entity {
       if (this.leap && (this.onGround || this.inWater || feet === BLOCK.HAY)) this.leap = null;
       else if (!this.leap && groundedAtStart && !this.onGround && !this.climbing) {
         const st = this.game.story, vp = st && st.plan && st.plan.perchAt(p, CONFIG.STORY.LEAP_RANGE);
-        if (vp) { this.leap = vp.hay; this.leapY = p.y; this.game.events.emit('leap', { character: this }); }
+        if (vp) { this.leap = vp.hay; this.leapY = p.y; this.game.events.emit('leap', { character: this, vp }); }
       }
     }
     this.eyeOffset *= Math.exp(-P.STEP_EASE * dt);

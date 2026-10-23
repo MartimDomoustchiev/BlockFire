@@ -344,6 +344,7 @@ const CONFIG = {
     LOS_INTERVAL: 0.25,
     LOOT_RADIUS: 28,
     STUCK_TIME: 1.2,
+    HEARING: 70,               // blocks: bots go to look at gunfire this close that they cannot see
     NAMES_A: ['Rusty', 'Neon', 'Quiet', 'Lucky', 'Brisk', 'Pixel', 'Copper', 'Turbo', 'Frosty', 'Mossy', 'Solar', 'Grumpy'],
     NAMES_B: ['Badger', 'Comet', 'Crate', 'Falcon', 'Gecko', 'Hammer', 'Lantern', 'Otter', 'Pickle', 'Rocket', 'Sprout', 'Yeti'],
   },
@@ -351,18 +352,18 @@ const CONFIG = {
   // --- Story mode -----------------------------------------------------------
   STORY: {
     SEED: 'kestrel-isle',      // the story always plays on the same island (any seed works, though)
-    ISLAND_RADIUS: 190,
+    ISLAND_RADIUS: 425,        // five times the first island's land (190): an outer ring of villages and camps round the story's
     // per site kind: flattened radius, blend ring around it, highest ground level allowed (towers must fit under 64)
     SITES: {
       keep:    { flat: 27, blend: 12, maxH: 34 },
-      village: { flat: 23, blend: 12, maxH: 37 },
+      village: { flat: 26, blend: 12, maxH: 37 },        // (26: room for the houses round a square that up to five roads cross)
       camp:    { flat: 16, blend: 10, maxH: 40 },
       hideout: { flat: 13, blend: 10, maxH: 38 },
     },
     TOWER_HEIGHT: { village: 20, keep: 24, hideout: 14 },
     NAMES: {
-      village: ['Brindle', 'Saltreach', 'Mossford', 'Harrowdale'],
-      camp: ['Redcliff Camp', 'Ironwood Camp', 'Tollgate Camp'],
+      village: ['Brindle', 'Saltreach', 'Mossford', 'Harrowdale', 'Thornwick', 'Duneholm', 'Reedmarsh', 'Cinderwell'],
+      camp: ['Redcliff Camp', 'Ironwood Camp', 'Tollgate Camp', 'Ashgate Camp', 'Saltpan Camp', 'Blackrock Camp'],
       keep: 'Vale Keep', hideout: 'The Lantern Ruin',
     },
     // movement
@@ -425,7 +426,9 @@ const CONFIG = {
       BODY_RANGE: 18,          // guards notice bodies this far away
       ALARM_TIME: 30,          // a found body puts the whole site on alert this long
     },
-    GUARD: { HEALTH: 100, CAPTAIN_HEALTH: 220, WALK: 0.55, RUN: 1, REACTION: 0.5, AIM_ERROR: 0.05, RESPAWN: 240 },
+    GUARD: { HEALTH: 100, CAPTAIN_HEALTH: 220, WALK: 0.55, RUN: 1, REACTION: 0.5, AIM_ERROR: 0.05, RESPAWN: 240,
+      DODGE: 0.35,             // chance a pressing swordsman steps back out of a swing aimed at him
+      WINDUP_BACK: 0.75 },     // s a swordsman steps back out after his cut, before looking for the next opening
     SMOKE: { TIME: 9, STUN: 4 },
     BLEND_RANGE: 2.8,          // two villagers this close hide you in the crowd (while walking)
     // Ida's shop at the hideout (open after chapter III); prices in silver

@@ -273,6 +273,13 @@ hooded coat, robes, kilts, cloaks, headcloths, collars, beards) that move with t
 figures. The lobby's *Body* row picks a man or a woman. In story mode the stone has worn, bevelled edges instead of
 cube corners, leaves grow as ivy and cloth hangs as awnings or lies as beds.
 
+### The island, the challenges and the bots
+
+Kestrel Isle is five times the size it was: the story's villages and camps lie further apart, and an outer ring of four
+more villages and three more camps waits to be explored, with 120 relics hidden across it. The journal holds 370
+challenges. Bots fight with a plan: they pick their target, use cover to reload and heal, hear gunfire and come at it
+from the side; the island's guards surround you, wait for an opening, cut and step back.
+
 ## Project layout
 
 ```

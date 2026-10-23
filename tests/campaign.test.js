@@ -203,7 +203,8 @@ const CAMPAIGN_TESTS = {
     await p2.reload({ timeout: 120000 });   // the story loads its island and its look (slow in a software-rendered browser)
     await p2.waitForFunction(() => window.__game && window.__game.story && document.getElementById('loading').style.display === 'none', null, { timeout: 120000 });
     const mig = await p2.evaluate(() => ({ chapter: __game.story.chapter, title: STORY_CHAPTERS[__game.story.chapter].title, silver: __game.story.silver, shop: __game.story.shop, tolls: !!__game.story.flags.tollsTaken, synced: __game.story.synced.size }));
-    ctx.assert(mig.title === 'The Pickpocket' && mig.silver >= 321 && mig.shop && mig.tolls && mig.synced === 1, 'a version 2 save (next: Bells) continues at the first chapter after the last one played: ' + JSON.stringify(mig));
+    // (the save is from the smaller island: its viewpoints were other places, so they are not carried over)
+    ctx.assert(mig.title === 'The Pickpocket' && mig.silver >= 321 && mig.shop && mig.tolls && mig.synced === 0, 'a version 2 save (next: Bells) continues at the first chapter after the last one played: ' + JSON.stringify(mig));
     const label = await p2.evaluate(() => { const m = document.getElementById('storyNew'); window.__menu && window.__menu.syncStorySave && window.__menu.syncStorySave(); return m ? m.options[0].textContent : null; });
     ctx.assert(label === null || /Chapter X of XVIII/.test(label), 'the menu names the chapter: ' + label);
   },

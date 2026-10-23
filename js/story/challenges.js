@@ -86,3 +86,97 @@ const STORY_CHALLENGES = [
   { id: 'master', title: 'Master Forger', text: 'Bring a piece of gear to its highest level.', check: (S) => S.stats.maxedGear >= 1, reward: { silver: 90 } },
   { id: 'magistrate', title: 'The Magistrate Falls', text: 'Finish the campaign.', check: (S) => S.finished, reward: { silver: 200, gear: ['gear_ghost'] } },
 ];
+
+/*
+ * Ten times as many challenges (the island is five times bigger): ladders on every counter, every site and viewpoint,
+ * every chapter, and the relics. Generated from the counters and the island's names, so ids stay the same from save to
+ * save (the 37 above keep theirs). `group` sorts them in the journal.
+ */
+(function moreChallenges() {
+  const C = STORY_CHALLENGES, N = CONFIG.STORY.NAMES;
+  const key = (name) => name.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
+  const have = new Set(C.map((c) => c.id));
+  const add = (c) => { if (!have.has(c.id)) { have.add(c.id); C.push(c); } };
+  for (const c of C) c.group = c.group || 'The Order';
+  const ROMAN_N = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+  const fmt = (n) => (n >= 1000 ? (n / 1000) + 'k' : String(n));
+  /** A ladder on a counter: one challenge per target, silver growing with it. */
+  const ladder = (stat, group, title, text, targets, pay, get) => {
+    targets.forEach((n, i) => add({
+      id: 'l-' + stat + '-' + n, group, title: title + ' ' + ROMAN_N[i % ROMAN_N.length], text: text(n),
+      check: get ? (S) => get(S) >= n : (S) => (S.stats[stat] || 0) >= n, reward: { silver: Math.round(pay(n, i)) },
+    }));
+  };
+  const step = (base) => (n, i) => base * (1 + i * 0.8);
+  // combat
+  ladder('kills', 'Combat', 'Warrior', (n) => `Take down ${n} enemies.`, [5, 10, 35, 50, 75, 100, 150, 200, 300, 500], step(15));
+  ladder('silent', 'Stealth', 'Quiet Death', (n) => `${n} silent takedown${n > 1 ? 's' : ''}.`, [1, 3, 10, 25, 35, 50, 75, 100], step(15));
+  ladder('arrows', 'Combat', 'Bowman', (n) => `${n} kill${n > 1 ? 's' : ''} with the bow.`, [1, 5, 20, 35, 50, 75, 100, 150], step(12));
+  ladder('parries', 'Combat', 'Steel Wall', (n) => `Parry ${n} sabre blow${n > 1 ? 's' : ''}.`, [1, 10, 20, 35, 50, 75, 100], step(14));
+  ladder('meleeKills', 'Combat', 'Swordsman', (n) => `Cut down ${n} enem${n > 1 ? 'ies' : 'y'} with a sword.`, [1, 10, 25, 50, 100], step(14));
+  ladder('nightKills', 'Stealth', 'Night Hunter', (n) => `Take down ${n} enem${n > 1 ? 'ies' : 'y'} at night.`, [1, 10, 25, 50, 100, 200], step(16));
+  ladder('headshots', 'Combat', 'Dead Eye', (n) => `${n} headshot${n > 1 ? 's' : ''}.`, [1, 5, 10, 25, 50], step(14));
+  ladder('smokeThrown', 'Combat', 'Smoke Screen', (n) => `Throw ${n} smoke bomb${n > 1 ? 's' : ''}.`, [1, 10, 25, 50], step(10));
+  ladder('consumed', 'Combat', 'Field Medic', (n) => `Use ${n} healing item${n > 1 ? 's' : ''}.`, [1, 10, 25, 50], step(10));
+  // moving about the bigger island
+  ladder('leaps', 'Explorer', 'Leap of Faith', (n) => `${n} leap${n > 1 ? 's' : ''} of faith.`, [1, 5, 20, 35, 50, 75, 100, 150], step(10));
+  ladder('distance', 'Explorer', 'Wanderer', (n) => `Walk ${fmt(n)} blocks on the island.`, [500, 5000, 10000, 20000, 35000, 50000, 75000, 100000], step(20));
+  ladder('climbed', 'Explorer', 'Climber', (n) => `Climb ${fmt(n)} blocks of walls and towers.`, [50, 200, 500, 1000, 2000, 5000, 10000], step(15));
+  ladder('swum', 'Explorer', 'Swimmer', (n) => `Swim ${fmt(n)} blocks.`, [100, 500, 1000, 2500, 5000], step(15));
+  ladder('travels', 'Explorer', 'Swift Travel', (n) => `Travel by synchronized viewpoints ${n} time${n > 1 ? 's' : ''}.`, [1, 10, 25, 50, 100], step(10));
+  ladder('synced', 'Explorer', 'Eagle Eye', (n) => `Synchronize ${n} viewpoint${n > 1 ? 's' : ''}.`, [1, 3, 8, 10], step(15), (S) => S.synced.size);
+  ladder('visited', 'Explorer', 'Pathfinder', (n) => `Set foot in ${n} places: villages, camps, the keep and the hideout.`, [3, 6, 10], step(15), (S) => S.visited.size);
+  // the Order's business
+  ladder('contracts', 'The Order', 'Contracts', (n) => `Finish ${n} contract${n > 1 ? 's' : ''}.`, [1, 5, 12, 16, 20, 30, 40, 50], step(20));
+  ladder('purchases', 'The Order', 'Patron', (n) => `Buy ${n} thing${n > 1 ? 's' : ''} from Ida.`, [1, 10, 15, 25], step(10));
+  ladder('posters', 'The Order', 'Clean Slate', (n) => `Tear down ${n} wanted posters.`, [3, 5, 10, 20], step(10));
+  ladder('upgrades', 'The Order', 'Smith', (n) => `Upgrade gear ${n} times at Ida's forge.`, [3, 5, 10, 15], step(15));
+  ladder('maxedGear', 'The Order', 'Master Smith', (n) => `Bring ${n} pieces of gear to their highest level.`, [2, 3, 4], step(40));
+  ladder('silverEarned', 'The Order', 'Treasurer', (n) => `Earn ${fmt(n)} silver.`, [100, 250, 500, 1000, 2500, 5000, 10000], (n) => Math.min(400, n * 0.06));
+  ladder('letters', 'The Order', 'Correspondent', (n) => `Find ${n} Order letter${n > 1 ? 's' : ''}.`, [1, 4], step(15), (S) => S.letters.size);
+  // the chapters
+  ladder('chapterClean', 'Chapters', 'Unseen', (n) => `Finish ${n} chapter${n > 1 ? 's' : ''} without being spotted.`, [1, 6, 12, 15, 18], step(30));
+  ladder('chapterCleanHands', 'Chapters', 'Clean Hands', (n) => `Finish ${n} chapters without an innocent death.`, [3, 6, 9, 12, 18], step(20));
+  ladder('chapterUnhurt', 'Chapters', 'Untouched', (n) => `Finish ${n} chapters without taking a blow.`, [3, 6, 9, 12, 18], step(25));
+  ladder('nightChapters', 'Chapters', 'Night Owl', (n) => `Finish ${n} chapters at night.`, [3, 6, 9], step(20));
+  const ROMAN18 = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII'];
+  for (let i = 0; i < 18; i++) {
+    add({ id: 'ghost-ch' + i, group: 'Chapters', title: 'Chapter ' + ROMAN18[i] + ': Unseen', text: `Finish chapter ${ROMAN18[i]} without being spotted.`, check: (S) => !!S.flags['ghost:' + i], reward: { silver: 40 + i * 4 } });
+    add({ id: 'unhurt-ch' + i, group: 'Chapters', title: 'Chapter ' + ROMAN18[i] + ': Untouched', text: `Finish chapter ${ROMAN18[i]} without taking a blow.`, check: (S) => !!S.flags['unhurt:' + i], reward: { silver: 40 + i * 4 } });
+  }
+  // every place on the island
+  const villages = N.village, camps = N.camp, keep = N.keep, hideout = N.hideout;
+  const places = villages.concat(camps, [keep, hideout]);
+  for (const name of places) add({ id: 'visit-' + key(name), group: 'Places', title: 'Visit ' + name, text: `Set foot in ${name}.`, check: (S) => S.visited.has(key(name)), reward: { silver: 15 } });
+  for (const name of [hideout].concat(villages, [keep])) {
+    const k = key(name);
+    add({ id: 'sync-' + k, group: 'Places', title: 'Viewpoint: ' + name, text: `Synchronize the viewpoint in ${name}.`, check: (S) => Array.from(S.synced).some((i) => S.plan.viewpoints[i] && S.plan.viewpoints[i].site.key === k), reward: { silver: 20 } });
+    add({ id: 'travel-' + k, group: 'Places', title: 'Road to ' + name, text: `Travel to the viewpoint in ${name} from another.`, check: (S) => !!S.flags['travel:' + k], reward: { silver: 15 } });
+    add({ id: 'leap-' + k, group: 'Places', title: 'Leap: ' + name, text: `Make a leap of faith from the viewpoint in ${name}.`, check: (S) => !!S.flags['leap:' + k], reward: { silver: 20 } });
+  }
+  for (const name of camps.concat([keep])) {
+    const k = key(name);
+    [[1, 'First Blood'], [10, 'Thinned Out'], [25, 'Broken']].forEach(([n, t]) => add({ id: 'kills-' + k + '-' + n, group: 'Places', title: name + ': ' + t,
+      text: `Take down ${n} enem${n > 1 ? 'ies' : 'y'} in ${name}.`, check: (S) => (S.flags['kills:' + k] | 0) >= n, reward: { silver: 15 + n * 3 } }));
+    [[1, 'A Shadow'], [5, 'Ghosts'], [15, 'Haunted']].forEach(([n, t]) => add({ id: 'silent-' + k + '-' + n, group: 'Places', title: name + ': ' + t,
+      text: `${n} silent takedown${n > 1 ? 's' : ''} in ${name}.`, check: (S) => (S.flags['silent:' + k] | 0) >= n, reward: { silver: 20 + n * 4 } }));
+  }
+  for (const name of villages) {
+    const k = key(name);
+    add({ id: 'kills-' + k + '-1', group: 'Places', title: name + ': Patrol Broken', text: `Take down a guard in ${name}.`, check: (S) => (S.flags['kills:' + k] | 0) >= 1, reward: { silver: 20 } });
+    add({ id: 'silent-' + k + '-3', group: 'Places', title: name + ': Quiet Streets', text: `Three silent takedowns in ${name}.`, check: (S) => (S.flags['silent:' + k] | 0) >= 3, reward: { silver: 35 } });
+  }
+  for (const name of villages.concat(camps)) {
+    const k = key(name);
+    add({ id: 'contract-' + k, group: 'Places', title: 'Work in ' + name, text: `Finish a contract in ${name}.`, check: (S) => !!S.flags['contract:' + k], reward: { silver: 30 } });
+  }
+  // the relics
+  const relicsIn = (S, area) => S.plan.relics.reduce((n, r, i) => n + (r.area === area && S.relics.has(i) ? 1 : 0), 0);
+  const relicsAt = (S, area) => S.plan.relics.filter((r) => r.area === area).length;
+  for (const name of places) {
+    const k = key(name);
+    add({ id: 'relics-' + k, group: 'Relics', title: 'Relics of ' + name, text: `Find every relic in the land round ${name}.`, check: (S) => relicsAt(S, k) > 0 && relicsIn(S, k) >= relicsAt(S, k), reward: { silver: 50 } });
+  }
+  add({ id: 'relics-wilds', group: 'Relics', title: 'Relics of the Wilds', text: 'Find every relic out on the open island.', check: (S) => relicsAt(S, 'wilds') > 0 && relicsIn(S, 'wilds') >= relicsAt(S, 'wilds'), reward: { silver: 60 } });
+  ladder('relics', 'Relics', 'Relic Hunter', (n) => `Find ${n} old relic${n > 1 ? 's' : ''}.`, [1, 5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120], (n) => 10 + n * 1.5, (S) => S.relics.size);
+})();

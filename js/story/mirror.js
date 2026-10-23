@@ -23,7 +23,7 @@ class StoryMirror {
     this.synced = new Set();
     this.explored = [];
     this.stats = {}; this.flags = {};
-    this.letters = new Set(); this.challengesDone = new Set(); this.visited = new Set();
+    this.letters = new Set(); this.challengesDone = new Set(); this.visited = new Set(); this.relics = new Set();
     this.obj = null;
     this.prompt = null;
     this.action = null;
@@ -37,7 +37,7 @@ class StoryMirror {
     this.explored = s.fog || [];
     if (s.jr) {
       this.stats = s.jr.s || {}; this.flags = s.jr.f || {};
-      this.letters = new Set(s.jr.l || []); this.challengesDone = new Set(s.jr.c || []); this.visited = new Set(s.jr.vi || []);
+      this.letters = new Set(s.jr.l || []); this.challengesDone = new Set(s.jr.c || []); this.visited = new Set(s.jr.vi || []); this.relics = new Set(s.jr.rl || []);
     }
     this.obj = s.obj;
     this.objAt = this.game.time;

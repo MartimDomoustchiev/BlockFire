@@ -4,7 +4,8 @@
  * From the seed alone (so every worker, and every online player,
  * builds the same island) this plans:
  *   - the Magistrate's keep on the central hill, four villages around
- *     it, three enforcer camps between them and the Order's hideout;
+ *     it, three enforcer camps between them and the Order's hideout,
+ *     and an outer ring of four more villages and three more camps;
  *   - roads between them (graded: the terrain along a road is blended
  *     towards a smoothed height profile, so roads have no cliffs);
  *   - every block of every structure: houses with gabled roofs,
@@ -97,8 +98,9 @@ WorkerBundle.add(function sitesPart() {
   function planInfo() {
     if (!PLAN) return null;
     return {
-      sites: PLAN.sites.map((s) => ({ id: s.id, kind: s.kind, x: s.x, z: s.z, h: s.h, flat: s.flat, poi: s.poi })),
+      sites: PLAN.sites.map((s) => ({ id: s.id, kind: s.kind, x: s.x, z: s.z, h: s.h, flat: s.flat, poi: s.poi, outer: !!s.outer })),
       roads: PLAN.roads.map((r) => ({ a: r.a, b: r.b, pts: r.pts })),
+      relics: PLAN.relics || [],
     };
   }
 
@@ -138,14 +140,52 @@ WorkerBundle.add(function sitesPart() {
     }
     const ha = base + Math.PI / 4 + 3 * Math.PI / 2 + (rnd() - 0.5) * 0.2;
     const hideout = add('hideout', Math.cos(ha) * R * 0.6, Math.sin(ha) * R * 0.6);
+    // the outer ring (the island is five times the first one's land): four more villages and three more camps, each
+    // kept clear of every site before it. The story's chapters stay on the inner sites; these are for contracts,
+    // viewpoints, exploring and the challenges
+    // each one at the spot of the ring farthest from every site already placed (so the ring spreads out evenly)
+    const outer = (kind, a0, d0, n) => {
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        let best = null;
+        for (let k = 0; k < 36; k++) {
+          const a = a0 + k / 36 * Math.PI * 2 + (rnd() - 0.5) * 0.05, d = R * (d0 + (rnd() - 0.5) * 0.06);
+          const x = Math.cos(a) * d, z = Math.sin(a) * d;
+          const room = Math.min(...sites.map((o) => Math.hypot(o.x - x, o.z - z) - o.flat - o.blend));
+          if (!best || room > best.room) best = { x, z, room };
+        }
+        const s2 = add(kind, best.x, best.z);
+        s2.outer = true;
+        out.push(s2);
+      }
+      return out;
+    };
+    const outerVillages = outer('village', base + Math.PI / 4 + 0.35, 0.8, 4);
+    const outerCamps = outer('camp', base + 0.6, 0.72, 3);
 
-    // roads: keep <-> villages, the village ring, each camp and the hideout to the nearest village
-    const links = [];
-    for (const v of villages) links.push([keep, v]);
-    for (let i = 0; i < 4; i++) links.push([villages[i], villages[(i + 1) % 4]]);
-    const nearestVillage = (s) => villages.reduce((m, v) => (!m || Math.hypot(v.x - s.x, v.z - s.z) < Math.hypot(m.x - s.x, m.z - s.z) ? v : m), null);
-    for (const c of camps) links.push([c, nearestVillage(c)]);
-    links.push([hideout, nearestVillage(hideout)]);
+    // roads: keep <-> villages, the village ring, each camp to the village beside it (and the other one, if that village
+    // has room), the hideout to the nearest village; then the outer ring. A village takes at most VILLAGE_ROADS roads:
+    // every road needs a lane through it, and the houses need the rest of the ring round the square
+    const VILLAGE_ROADS = 5;
+    const links = [], count = new Map();
+    const n = (s) => count.get(s) || 0;
+    const room = (s) => s.kind !== 'village' || s.outer || n(s) < VILLAGE_ROADS;
+    const link = (A, B) => { if (!A || !B || A === B || links.some(([a, b]) => (a === A && b === B) || (a === B && b === A))) return false; links.push([A, B]); count.set(A, n(A) + 1); count.set(B, n(B) + 1); return true; };
+    const byDist = (s, list) => list.slice().sort((a, b) => Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(b.x - s.x, b.z - s.z));
+    for (const v of villages) link(keep, v);
+    for (let i = 0; i < 4; i++) link(villages[i], villages[(i + 1) % 4]);
+    link(hideout, byDist(hideout, villages)[0]);
+    for (const c of camps) {
+      const [a, b] = byDist(c, villages);
+      link(c, a);
+      if (room(b)) link(c, b);                                   // so the way there from either village is short
+    }
+    // the outer ring: each outer village to the nearest inner village with room (else the nearest camp) and round the
+    // ring; outer camps to the nearest village with room
+    for (const v of outerVillages) link(v, byDist(v, villages).find(room) || byDist(v, camps)[0]);
+    const loop = outerVillages.slice().sort((a, b) => Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x));
+    for (let i = 0; i < loop.length && loop.length > 2; i++) link(loop[i], loop[(i + 1) % loop.length]);
+    for (const c of outerCamps) link(c, byDist(c, villages.concat(outerVillages)).find(room));
     const roads = [], segs = [];
     PLAN = { sites, roads, segs, buckets: new Map() };       // columnHeight sees the sites from here on
     for (const [A, B] of links) {
@@ -199,7 +239,32 @@ WorkerBundle.add(function sitesPart() {
       else if (s.kind === 'keep') buildKeep(s, T);
       else buildHideout(s, T);
     }
+    PLAN.relics = placeRelics(sites, R);
     return PLAN;
+  }
+
+  /**
+   * The relics of the old island (the challenges' collectibles): seven in the land round every site, outside its
+   * walls and fields, and eight out in the wilds, on dry ground. Each knows the site whose land it is in (area, -1 for
+   * the wilds). Seeded, so every player finds them in the same places.
+   */
+  function placeRelics(sites, R) {
+    const rnd = rng32((SEED ^ 0x7e11c5) >>> 0), out = [];
+    const free = (x, z) => sites.every((o) => Math.hypot(o.x - x, o.z - z) > o.flat + o.blend + 3) && Math.hypot(x, z) < R * 0.92;
+    const tryAt = (cx, cz, r0, r1, area) => {
+      for (let t = 0; t < 40; t++) {
+        const a = rnd() * Math.PI * 2, d = r0 + rnd() * (r1 - r0), x = Math.round(cx + Math.cos(a) * d), z = Math.round(cz + Math.sin(a) * d);
+        if (!free(x, z)) continue;
+        const h = columnHeight(x, z);
+        if (h <= SEA + 1) continue;
+        out.push({ x: x + 0.5, y: h + 1, z: z + 0.5, area });
+        return true;
+      }
+      return false;
+    };
+    for (const s of sites) for (let i = 0; i < 7; i++) tryAt(s.x, s.z, s.flat + s.blend + 6, s.flat + s.blend + 60, s.id);
+    for (let i = 0; i < 8; i++) tryAt(0, 0, R * 0.25, R * 0.9, -1);
+    return out;
   }
 
   // ------------------------------------------------------------------ shared pieces

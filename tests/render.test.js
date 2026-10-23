@@ -94,6 +94,33 @@ const RENDER_TESTS = {
     ctx.assert(TABLES.solid[BLOCK.PALM] === 1 && TABLES.opaque[BLOCK.PALM] === 1 && TABLES.faceTiles[BLOCK.PALM * 6] === -1, 'the palm core is solid, opaque and has no tile');
   },
 
+  'story island: five times the land, an outer ring of sites, 120 relics and 370 challenges that name real places': async (ctx) => {
+    const { w, CONFIG } = storyPatch(ctx, 20260101, 0, 0, 0);
+    const info = w.send({ type: 'plan', id: 9 }).plan;
+    ctx.assert(CONFIG.STORY.ISLAND_RADIUS >= 420, 'the island is five times the first one (radius 190): ' + CONFIG.STORY.ISLAND_RADIUS);
+    const outer = info.sites.filter((s) => s.outer);
+    ctx.assert(info.sites.length === 16 && outer.length === 7, 'keep, 8 villages, 6 camps, the hideout (7 of them on the outer ring): ' + info.sites.length + ' / ' + outer.length);
+    let gap = Infinity;
+    for (const a of info.sites) for (const b of info.sites) if (a.id < b.id) gap = Math.min(gap, Math.hypot(a.x - b.x, a.z - b.z) - a.flat - b.flat);
+    ctx.assert(gap > 20, 'no two sites overlap: ' + gap.toFixed(1));
+    ctx.assert(info.relics.length === 120 && info.relics.every((r) => info.sites.every((s) => Math.hypot(s.x - r.x, s.z - r.z) > s.flat)), '120 relics, none inside a site: ' + info.relics.length);
+    // the main thread's view of it, the story's places and the challenges (in a context of their own)
+    const vm = require('vm'), fs = require('fs'), path = require('path');
+    const c = vm.createContext({ console, THREE: {} });
+    for (const f of ['js/constants.js', 'js/story/plan.js', 'js/story/challenges.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), c, { filename: f });
+    const r = vm.runInContext(`(() => {
+      const plan = new StoryPlan(${JSON.stringify(info)});
+      const keys = new Set(plan.sites.map((s) => s.key));
+      const ids = new Set(STORY_CHALLENGES.map((x) => x.id));
+      const named = STORY_CHALLENGES.filter((x) => /^(visit|sync|leap|travel|relics|contract|kills|silent)-/.test(x.id) && x.id !== 'relics-wilds');
+      const missing = named.map((x) => x.id.replace(/^[a-z]+-/, '').replace(/-[0-9]+$/, '')).filter((k) => !keys.has(k));
+      return { n: STORY_CHALLENGES.length, ids: ids.size, missing, relicAreas: new Set(plan.relics.map((x) => x.area)).size, inner: plan.villages.filter((v) => !v.outer).length };
+    })()`, c);
+    ctx.assert(r.n === 370 && r.ids === 370, 'ten times the 37 challenges, each with its own id: ' + r.n + ' / ' + r.ids);
+    ctx.assert(r.missing.length === 0, 'every place a challenge names is on the island: ' + JSON.stringify(r.missing.slice(0, 5)));
+    ctx.assert(r.relicAreas === 17 && r.inner === 4, 'relics round every site and in the wilds; the story keeps its four villages: ' + JSON.stringify(r));
+  },
+
   'story mesher: stone gets bevelled corners; ivy, awnings and beds are props, not cubes': async (ctx) => {
     const { w, BLOCK } = storyPatch(ctx, 20260101, 0, 0, 0);
     const c = new Uint8Array(16 * 16 * 64), put = (x, y, z, id) => { c[x + z * 16 + y * 256] = id; };

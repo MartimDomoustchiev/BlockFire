@@ -96,6 +96,10 @@ class StoryScreens {
       if (ab) ab.addEventListener('click', () => { this.act({ a: 'abandon' }); this.close(true); });
     } else if (K === 'journal') {
       this.root.innerHTML = this.journalHTML(st);
+      // remember which challenge groups are open, so the journal reopens the same way
+      this.root.querySelectorAll('details[data-group]').forEach((d) => d.addEventListener('toggle', () => {
+        if (d.open) this.openGroups.add(d.dataset.group); else this.openGroups.delete(d.dataset.group);
+      }));
     } else if (K === 'gear') {
       if (!this.gear) this.gear = new GearView(this.root, (op, i, j) => this.act({ a: 'gear', g: op, i, j }));
       this.gear.open(g.player, st);
@@ -119,14 +123,25 @@ class StoryScreens {
       const mark = i < st.chapter ? '&#10003;' : i === st.chapter && !st.finished ? '&#9654;' : '&middot;';
       return '<li' + done(i < st.chapter) + '><i>' + mark + '</i> <b>' + ROMAN[i] + '. ' + esc(c.title) + '</b></li>';
     }).join('');
-    const challenges = STORY_CHALLENGES.map((c) => {
+    // 370 challenges: grouped, each group folded away with how many of it are done (the open ones first)
+    const item = (c) => {
       const ok = st.challengesDone.has(c.id), r = c.reward;
       const pays = (r.silver ? r.silver + ' silver' : '') + (r.gear ? (r.silver ? ', ' : '') + r.gear.map((id) => CONFIG.STORY.GEAR.PIECES[id].name).join(', ') : '');
       return '<li' + done(ok) + '><i>' + (ok ? '&#10003;' : '&middot;') + '</i> <b>' + esc(c.title) + '</b><span>' + esc(c.text) + (pays ? ' <em>' + esc(pays) + '</em>' : '') + '</span></li>';
+    };
+    const groups = new Map();
+    for (const c of STORY_CHALLENGES) { const g = c.group || 'The Order'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(c); }
+    this.openGroups = this.openGroups || new Set(['The Order']);
+    const challenges = Array.from(groups, ([g, list]) => {
+      const n = list.filter((c) => st.challengesDone.has(c.id)).length;
+      const sorted = list.filter((c) => !st.challengesDone.has(c.id)).concat(list.filter((c) => st.challengesDone.has(c.id)));
+      return '<li class="jGroup"><details data-group="' + esc(g) + '"' + (this.openGroups.has(g) ? ' open' : '') + '><summary><b>' + esc(g) + '</b> <span>' + n + ' / ' + list.length + '</span></summary><ul class="jList">' +
+        sorted.map(item).join('') + '</ul></details></li>';
     }).join('');
     const letters = ORDER_LETTERS.map((L, i) => '<li' + done(st.letters.has(i)) + '>' + (st.letters.has(i) ? esc(L.text) : '<span class="unread">An unread letter. It lies somewhere on the island.</span>') + '</li>').join('');
     const tally = 'silver ' + st.silver + '  &middot;  kills ' + (st.stats.kills | 0) + '  &middot;  silent ' + (st.stats.silent | 0) + '  &middot;  letters ' + st.letters.size + '/' + ORDER_LETTERS.length +
-      '  &middot;  challenges ' + st.challengesDone.size + '/' + STORY_CHALLENGES.length + '  &middot;  contracts ' + (st.stats.contracts | 0);
+      '  &middot;  challenges ' + st.challengesDone.size + '/' + STORY_CHALLENGES.length + '  &middot;  relics ' + (st.relics ? st.relics.size : 0) + '/' + (st.plan && st.plan.relics ? st.plan.relics.length : 0) +
+      '  &middot;  contracts ' + (st.stats.contracts | 0);
     return '<div class="panel journal"><button class="sClose alt">CLOSE</button><h2>THE ORDER\'S JOURNAL</h2><p class="hint tally">' + tally + '</p>' +
       '<div class="jCols"><div><h3>CHAPTERS</h3><ul class="jList">' + chapters + '</ul></div>' +
       '<div><h3>CHALLENGES</h3><ul class="jList">' + challenges + '</ul></div>' +

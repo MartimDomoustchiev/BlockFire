@@ -8,7 +8,7 @@
  * so the next launch picks up a new version. Other sites (the online
  * matchmaking server) are never cached.
  * ============================================================ */
-const CACHE = 'blockfire-v9';   // bump when the files change shape (new scripts, new assets)
+const CACHE = 'blockfire-v10';   // bump when the files change shape (new scripts, new assets)
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'])).catch(() => {}));

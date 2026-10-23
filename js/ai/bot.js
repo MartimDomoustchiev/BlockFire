@@ -13,7 +13,16 @@
  * and every tick it steers (detours around walls, jumps, avoids cliff
  * drops, gets unstuck, ramp-rushes up when blocked), aims (turn-rate
  * limited, with a re-rolled aim error, lead for moving targets and
- * bullet drop) and fires after a reaction delay. Difficulty settings
+ * bullet drop) and fires after a reaction delay.
+ *
+ * The fighting brain: it picks the enemy that matters (who is hurting
+ * it, who is close, who is weak; it sticks with a target rather than
+ * flicking between them), hears gunfire it cannot see and closes in on
+ * it from the side, fires in bursts at range, swaps to a loaded gun
+ * rather than reloading under fire, falls back to cover (a spot nearby
+ * the enemy has no line to) to reload or heal and peeks out again,
+ * presses when the enemy is weak or reloading, and its aim settles the
+ * longer it tracks someone. Difficulty settings
  * (CONFIG.BOTS.DIFFICULTY) scale reaction time, aim error, turn rate,
  * view distance, how often they build cover and when they heal.
  * All randomness comes from the bot's own seeded Rng.
@@ -51,6 +60,11 @@ class BotController {
     this.goalKey = null;
     this.blacklist = new Map();           // unreachable loot goal key -> time it may be tried again
     this.dig = null;                      // { x, y, z, until } block being dug out of the way
+    this.cover = null;                    // { pos, until, why } a spot out of the target's sight
+    this.coverScanAt = -10;
+    this.burstUntil = 0; this.pauseUntil = 0;
+    this.trackSince = 0;                  // when we started tracking the current target (the aim settles)
+    this.flank = 0;                       // which side we close in from while hunting (+1 / -1)
   }
 
   gauss() { return (this.rng.next() + this.rng.next() + this.rng.next() - 1.5) / 0.5; }
@@ -174,8 +188,18 @@ class BotController {
     const storm = game.match && game.match.storm;
     const guns = this.usableWeapons(game, ch);
     const enemies = this.enemies(game, ch);
-    let target = null;
-    for (const { e } of enemies) if (this.canSee(game, ch, e)) { target = e; break; }
+    // the enemy that matters most: hurting us, close, weak, aiming our way; the current one keeps a little priority
+    let target = null, best = -Infinity;
+    for (const { e, d } of enemies) {
+      if (!this.canSee(game, ch, e)) continue;
+      let sc = 30 / (d + 5);
+      if (ch.lastDamagedBy === e && game.time - ch.lastDamageTime < 3) sc += 2.5;
+      if (e === this.target) sc += 1.2;
+      sc += (1 - Math.min(1, ((e.health || 100) + (e.shield || 0)) / 150)) * 1.5;
+      const to = ch.pos.clone().sub(e.pos), facing = (-Math.sin(e.yaw) * to.x - Math.cos(e.yaw) * to.z) / Math.max(1e-3, Math.hypot(to.x, to.z));
+      if (facing > 0.95) sc += 0.8;                         // looking straight at us
+      if (sc > best) { best = sc; target = e; }
+    }
     // someone shooting us we can't see: turn to them
     if (!target && ch.lastDamagedBy && ch.lastDamagedBy !== ch && ch.lastDamagedBy.alive && game.time - ch.lastDamageTime < 1.5) {
       if (ch.lastDamagedBy.pos.distanceTo(ch.pos) < this.D.view * 1.3) target = ch.lastDamagedBy;
@@ -183,8 +207,15 @@ class BotController {
     if (target !== this.target) {
       this.target = target;
       this.reactAt = game.time + this.D.reaction * this.rng.float(0.8, 1.25);
+      this.trackSince = game.time;
+      this.flank = this.rng.chance(0.5) ? 1 : -1;
     }
     if (target) this.lastSeen = { pos: target.pos.clone(), at: game.time };
+    // gunfire we cannot see: go and look (unless we're busy staying alive)
+    if (!target && (!this.lastSeen || game.time - this.lastSeen.at > 4) && ch.health > 45) {
+      const heard = this.hearShot(game, ch);
+      if (heard) this.lastSeen = { pos: heard, at: game.time - 2 };
+    }
 
     const healSlot = this.healSlot(ch);
     const outsideNow = storm && storm.outside(ch.pos.x, ch.pos.z) > -2;
@@ -198,8 +229,8 @@ class BotController {
     else if (healSlot >= 0 && ch.health < this.D.healAt + 20 && (!target || target.pos.distanceTo(ch.pos) > 25) && !outsideNow) next = 'heal';
     else if (healSlot >= 0 && ch.shield < 50 && !target && !outsideNow && ITEMS[ch.inventory.get(healSlot).id].consumable.shield) next = 'heal';
     else if (outsideNow || outsideNext) next = 'storm';
+    else if (this.lastSeen && game.time - this.lastSeen.at < 9 && guns.length && ch.health > 50) next = 'hunt';     // a fight nearby: go and take it
     else if (!guns.length || this.wantsLoot(game, ch, guns)) next = 'loot';
-    else if (this.lastSeen && game.time - this.lastSeen.at < 6 && guns.length) next = 'hunt';
     else next = 'roam';
     if (next !== this.state) { this.state = next; this.goal = null; }
 
@@ -211,7 +242,10 @@ class BotController {
       this.pickLoot(game, ch, guns);
       if (!this.goal) { this.state = 'roam'; }
     } else if (this.state === 'hunt') {
-      this.goal = this.lastSeen.pos.clone(); this.goalKind = 'hunt';
+      // come in from the side, not straight down the line they last saw us on
+      const lp = this.lastSeen.pos, dx = lp.x - ch.pos.x, dz = lp.z - ch.pos.z, L = Math.hypot(dx, dz) || 1;
+      const off = L > 14 ? Math.min(10, L * 0.35) * this.flank : 0;
+      this.goal = new THREE.Vector3(lp.x - dz / L * off, lp.y, lp.z + dx / L * off); this.goalKind = 'hunt';
     }
     if (this.state === 'roam' && (!this.goal || this.goalKind !== 'roam' || game.time - this.goalSetAt > 25 || this.near(ch, this.goal, 4))) {
       this.goal = this.randomGoal(game, storm); this.goalKind = 'roam'; this.goalSetAt = game.time;
@@ -225,6 +259,53 @@ class BotController {
   }
 
   near(ch, p, r) { return Math.hypot(p.x - ch.pos.x, p.z - ch.pos.z) < r; }
+
+  /** The nearest gunshot by someone else in the last few seconds within earshot (the game's 'shot' events), or null. */
+  hearShot(game, ch) {
+    if (!game._botEars) {
+      const ears = game._botEars = [];
+      game.events.on('shot', (e) => { if (e && e.origin) { ears.push({ pos: e.origin.clone(), at: game.time, by: e.character }); if (ears.length > 64) ears.shift(); } });
+    }
+    let best = null, bd = CONFIG.BOTS.HEARING || 70;
+    for (const n of game._botEars) {
+      if (game.time - n.at > 3 || n.by === ch || (ch.team && n.by && n.by.team === ch.team)) continue;
+      const d = Math.hypot(n.pos.x - ch.pos.x, n.pos.z - ch.pos.z);
+      if (d < bd) { bd = d; best = n.pos; }
+    }
+    return best ? best.clone() : null;
+  }
+
+  /**
+   * A spot within ~9 blocks, as far from `threat` as we are or farther, where we can stand and `threat` has no line to
+   * our head: somewhere to reload or heal. Scanned at most a few times a second.
+   */
+  findCover(game, ch, threat) {
+    if (game.time - this.coverScanAt < 0.6) return this.cover ? this.cover.pos : null;
+    this.coverScanAt = game.time;
+    const w = game.world, y0 = Math.floor(ch.pos.y + 0.01), te = threat.eyePos ? threat.eyePos(new THREE.Vector3()) : threat.pos.clone().add(new THREE.Vector3(0, 1.6, 0));
+    const dNow = Math.hypot(threat.pos.x - ch.pos.x, threat.pos.z - ch.pos.z);
+    let best = null, bestScore = -Infinity;
+    const dir = new THREE.Vector3();
+    for (const r of [2.5, 4.5, 6.5, 9]) {
+      for (let k = 0; k < 12; k++) {
+        const a = k / 12 * Math.PI * 2 + r, x = ch.pos.x + Math.cos(a) * r, z = ch.pos.z + Math.sin(a) * r;
+        const bx = Math.floor(x), bz = Math.floor(z);
+        let y = -1;
+        for (const yy of [y0, y0 + 1, y0 - 1]) if (w.isSolid(bx, yy - 1, bz) && !w.isSolid(bx, yy, bz) && !w.isSolid(bx, yy + 1, bz)) { y = yy; break; }
+        if (y < 0) continue;
+        if (w.getBlock(bx, y, bz) === BLOCK.WATER) continue;
+        const dT = Math.hypot(threat.pos.x - x, threat.pos.z - z);
+        if (dT < dNow - 2) continue;                                       // not towards them
+        const head = new THREE.Vector3(bx + 0.5, y + 1.5, bz + 0.5);
+        dir.copy(head).sub(te); const L = dir.length(); dir.divideScalar(L);
+        const hit = raycastBlocks(w, te, dir, L, { filter: BULLET_STOPS });
+        if (!hit || hit.dist >= L - 0.6) continue;                         // they would still see us there
+        const sc = -r * 0.6 - Math.abs(dT - dNow) * 0.05;
+        if (sc > bestScore) { bestScore = sc; best = new THREE.Vector3(bx + 0.5, y, bz + 0.5); }
+      }
+    }
+    return best;
+  }
 
   randomGoal(game, storm) {
     const c = storm ? (storm.state === 'final' ? storm.cur : storm.to) : { x: 0, z: 0, r: CONFIG.ISLAND.RADIUS * 0.7 };
@@ -408,29 +489,55 @@ class BotController {
   // ------------------------------------------------------------------ fighting
   engage(game, ch, it, dt) {
     const t = this.target;
-    if (!t || !t.alive) { this.state = 'roam'; return; }
+    if (!t || !t.alive) { this.state = 'roam'; this.cover = null; return; }
     const guns = this.usableWeapons(game, ch);
     if (!guns.length) { this.state = 'loot'; return; }
     const dist = t.pos.distanceTo(ch.pos);
+    const visible = this.canSee(game, ch, t);
 
-    // weapon choice for this range
-    let best = null, bestScore = -1;
+    // weapon choice for this range; an empty gun loses to a loaded one (swapping is faster than reloading)
+    let best = null, bestScore = -Infinity;
     for (const g of guns) {
       const c = g.st.cls;
       let s = { shotgun: dist < 9 ? 6 : dist < 15 ? 2 : 0.2, smg: dist < 20 ? 4.5 : dist < 35 ? 2 : 0.5, ar: dist < 120 ? 3.5 : 1,
         pistol: dist < 45 ? 2 : 0.6, sniper: dist > 35 ? 5.5 : 0.8, rocket: (t.vehicle || dist > 10) && dist < 70 ? 3 : 0.1 }[c];
       s += g.st.rarity * 0.3;
-      if (g.stack.data.mag === 0) s -= 1;
+      if (g.stack.data.mag === 0) s -= 4;
       if (s > bestScore) { bestScore = s; best = g; }
     }
-    if (best.slot !== ch.selectedSlot) { it.slot = best.slot; return; }
-    const st = best.st;
+    if (best.slot !== ch.selectedSlot && !ch.reload) { it.slot = best.slot; return; }
+    const st = Weapons.of(ch.heldStack()) || best.st;
+    const held = ch.heldStack();
+    const empty = held && held.data && held.data.mag === 0;
 
-    // aim point: chest (sometimes head), lead moving targets, compensate bullet drop
+    // fall back to cover to reload or heal; come out again when ready
+    const hurt = ch.health + (ch.shield || 0) * 0.5 < 45 + this.D.healAt * 0.2;
+    const needCover = (empty || ch.reload || (hurt && this.healSlot(ch) >= 0)) && dist > 4;
+    if (needCover) {
+      if (!this.cover || game.time > this.cover.until) {
+        const c = this.findCover(game, ch, t);
+        this.cover = c ? { pos: c, until: game.time + 6, why: empty || ch.reload ? 'reload' : 'heal' } : null;
+      }
+    } else if (this.cover && !ch.reload && !ch.using) this.cover = null;
+    if (empty && !ch.reload) it.reload = true;
+    if (this.cover) {
+      const there = this.moveTo(game, ch, it, this.cover.pos, dt, 0.7, false);
+      const d = t.pos.clone().sub(ch.pos);
+      this.look(ch, it, Math.atan2(-d.x, -d.z), 0, dt);              // keep watching where they are
+      if (there && this.cover.why === 'heal' && !ch.reload) {
+        const hs = this.healSlot(ch);
+        if (hs >= 0) { if (ch.selectedSlot !== hs) it.slot = hs; else if (!ch.using) { it.fire = true; it.firePressed = true; } }
+        else this.cover = null;
+      }
+      return;
+    }
+
+    // aim: chest (sometimes head), lead moving targets, compensate drop; the error shrinks the longer we track them
     if (game.time >= this.err.until) {
-      const k = this.D.aimError * (1 + Math.hypot(t.vel.x, t.vel.z) * 0.12) * (ch.onGround ? 1 : 1.5);
+      const settle = Math.max(0.45, 1 - (game.time - this.trackSince) * 0.12);
+      const k = this.D.aimError * settle * (1 + Math.hypot(t.vel.x, t.vel.z) * 0.12) * (ch.onGround ? 1 : 1.5);
       this.err.yaw = this.gauss() * k; this.err.pitch = this.gauss() * k * 0.6;
-      this.err.until = game.time + this.rng.float(0.35, 0.7);
+      this.err.until = game.time + this.rng.float(0.3, 0.6);
       this.err.head = this.rng.chance(this.D.headshot);
     }
     const eye = ch.eyePos(new THREE.Vector3());
@@ -439,37 +546,39 @@ class BotController {
       const tt = dist / st.projectile.speed;
       aim.addScaledVector(t.vel, tt);
       aim.y += 0.5 * st.projectile.gravity * tt * tt;
-    }
+    } else aim.addScaledVector(t.vel, 0.06);                           // a hair of lead for the shot's travel and our reaction
     const d = aim.sub(eye);
     const yaw = Math.atan2(-d.x, -d.z) + this.err.yaw;
     const pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)) + this.err.pitch;
     this.look(ch, it, yaw, pitch, dt);
     const off = Math.hypot(wrapAngle(yaw - ch.yaw - it.lookDX), pitch - ch.pitch - it.lookDY);
 
-    // shoot when roughly on target and our reaction time has passed
-    const visible = this.canSee(game, ch, t);
+    // fire when on target after our reaction time; automatic weapons in bursts at range (they spray otherwise)
     const tol = Math.atan2(0.9, dist) + 0.02;
     if (visible && game.time >= this.reactAt && off < tol && !ch.reload) {
-      if (st.auto) it.fire = true;
-      else if (game.time >= this.nextShot) {
+      if (st.auto) {
+        if (dist < 18 || game.time < this.burstUntil) it.fire = true;
+        else if (game.time >= this.pauseUntil) { this.burstUntil = game.time + this.rng.float(0.2, 0.4); this.pauseUntil = this.burstUntil + this.rng.float(0.15, 0.3); it.fire = true; }
+      } else if (game.time >= this.nextShot) {
         it.fire = true; it.firePressed = true;
-        this.nextShot = game.time + st.interval * this.rng.float(1.05, 1.5);
+        this.nextShot = game.time + st.interval * this.rng.float(1.02, 1.3);
       }
     }
     it.aim = dist > 16 && st.cls !== 'shotgun';
-    if (best.stack.data.mag === 0 && !ch.reload) it.reload = true;
 
-    // movement: hold a preferred range and strafe
+    // movement: hold our range; push when they're weak or reloading, back off when we are; strafe with jitter
     const pref = BOT_PREF_RANGE[st.cls] || 20;
+    const theyWeak = ((t.health || 100) + (t.shield || 0)) < 45 || !!t.reload;
+    const weWeak = ch.health < 40;
     let mx = 0, mz = 0;
     const tx = (t.pos.x - ch.pos.x) / Math.max(dist, 1e-3), tz = (t.pos.z - ch.pos.z) / Math.max(dist, 1e-3);
-    if (dist > pref + 6 || !visible) { mx += tx; mz += tz; }
-    else if (dist < pref - 4) { mx -= tx; mz -= tz; }
-    if (game.time >= this.strafeUntil) { this.strafeDir = this.rng.chance(0.5) ? 1 : -1; this.strafeUntil = game.time + this.rng.float(0.6, 1.5); }
-    if (this.rng.next() < this.D.strafe) { mx += -tz * this.strafeDir * 0.8; mz += tx * this.strafeDir * 0.8; }
+    if ((dist > pref + 6 || !visible || theyWeak) && !weWeak) { mx += tx; mz += tz; if (theyWeak) it.sprint = true; }
+    else if (dist < pref - 4 || weWeak) { mx -= tx; mz -= tz; }
+    if (game.time >= this.strafeUntil) { this.strafeDir = this.rng.chance(0.5) ? 1 : -1; this.strafeUntil = game.time + this.rng.float(0.25, 0.9); }
+    if (this.rng.next() < this.D.strafe + 0.25) { mx += -tz * this.strafeDir; mz += tx * this.strafeDir; }
     if (!visible && this.lastSeen) { mx = this.lastSeen.pos.x - ch.pos.x; mz = this.lastSeen.pos.z - ch.pos.z; }
     this.moveDir(ch, it, mx, mz);
-    if (this.difficulty === 'hard' && ch.onGround && this.rng.chance(0.015)) it.jump = true;
+    if (this.difficulty !== 'easy' && ch.onGround && visible && this.rng.chance(this.difficulty === 'hard' ? 0.03 : 0.01)) it.jump = true;
 
     // build a wall towards an attacker when hit in the open
     if (game.time - ch.lastDamageTime < 0.1 && ch.lastDamagedBy === t && this.buildCd <= 0 &&

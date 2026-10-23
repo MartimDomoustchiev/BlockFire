@@ -493,6 +493,10 @@
   .jList li i { font-style: normal; color: #7af06e; }
   .jList li b { color: #fff; font-weight: normal; }
   .jList li span { display: block; margin-top: 2px; color: var(--dim); }
+  .jList li.jGroup { padding: 0; background: none; border-left: 0; }
+  .jGroup summary { cursor: pointer; padding: 7px 8px; background: #1b212b; border-left: 3px solid #b08a3c; font-size: 12px; list-style-position: inside; }
+  .jGroup summary span { float: right; color: var(--dim); }
+  .jGroup .jList { max-height: none; overflow: visible; margin-top: 6px; }
   .jList li em { font-style: normal; color: #ffd34a; }
   .jList li .unread { color: #6f7c90; font-style: italic; }
   @media (max-width: 860px) { .jCols { grid-template-columns: 1fr; } .jList { max-height: none; } }

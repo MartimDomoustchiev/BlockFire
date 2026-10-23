@@ -15,6 +15,13 @@
  *   XVII  The Seal             the Magistrate's seal, and a forged order
  * ============================================================ */
 
+/** Where a torn ledger page lies: the site's hiding spot `h` (the last one if it has fewer), else by its well or gate. */
+function pageSpot(S, k, h) {
+  const site = S.places[k], hs = site.poi.hides || [];
+  if (hs.length) return hs[Math.min(h, hs.length - 1)];
+  return (site.poi.spots && site.poi.spots[0]) || (site.poi.gates && site.poi.gates[0].out) || site;
+}
+
 /** Small builders and point finders the nine chapters share. */
 const StoryKit = {
   /** The inside of the n-th house of a village (a floor point; falls back to the square). */
@@ -199,7 +206,7 @@ const STORY_MORE_CHAPTERS = (() => {
       key: 'prisoners', title: 'The Prisoners',
       intro: [
         ['Old Wren', 'Vale answers every loss the same way: arrests. Tom, Nell and Hob are in the camp cages, held for the spoiled grain.'],
-        ['Old Wren', 'Pick the locks and they will make for the hideout on their own. Any guard who sees them will not be kind.'],
+        ['Old Wren', 'Pick the locks and they will run for the nearest village and lie low among their own. Any guard who sees them will not be kind.'],
       ],
       steps: [
         ...[['C1', 'Tom'], ['C2', 'Nell'], ['C3', 'Hob']].map(([k, name], i) => ({
@@ -218,14 +225,18 @@ const STORY_MORE_CHAPTERS = (() => {
           done: (S, M) => {
             const p = M.pr[i];
             p.fugitive = true;                                // the guards will go for a runaway
-            p.controller = new AllyController(p.id * 5 + 7, { mode: 'route', points: S.routeBetween(S.places[k], S.places.hideout), pace: 0.8 });
-            S.lines([[name, 'Thank you! I will run for the Lantern Ruin and not look back.']]);
+            // the island is big: they run for the nearest village (the one the camp's road leads to) and hide among people
+            const camp = S.places[k], safe = S.nearestVillage(camp);
+            p.safe = safe;
+            p.controller = new AllyController(p.id * 5 + 7, { mode: 'route', points: S.routeBetween(camp, safe), pace: 1 });
+            S.lines([[name, 'Thank you! I will run for ' + safe.name + ' and not look back.']]);
           },
         })),
         {
-          text: (S, M) => 'Watch the roads: the freed villagers are walking to the hideout (' + M.pr.filter((p) => p.alive && p.controller.done).length + '/3 home)',
-          hint: 'Wait at the hideout, or go and clear the road ahead of them. Guards will cut them down if they see them.',
-          marker: (S) => S.plan.hideout.poi.entrance,
+          text: (S, M) => 'Watch the roads: the freed villagers are running for the villages (' + M.pr.filter((p) => p.alive && p.controller.done).length + '/3 safe)',
+          hint: 'Go and clear the road ahead of them. Guards will cut them down if they see them.',
+          // the village the next one still on the road is running for
+          marker: (S, M) => { const p = (M.pr || []).find((q) => q && q.alive && !q.controller.done); return p && p.safe ? p.safe.poi.spots[0] : S.plan.hideout.poi.entrance; },
           check: (S, M) => M.pr.every((p) => !p.alive || p.controller.done),
           fail: (S, M) => (M.pr.every((p) => !p.alive) ? 'None of the prisoners made it home.' : null),
           retry: 0,
@@ -238,7 +249,7 @@ const STORY_MORE_CHAPTERS = (() => {
         K.report(),
       ],
       outro: [
-        ['Old Wren', 'They are home, and they will talk. Every village will know who opened the cages.'],
+        ['Old Wren', 'They are safe, and they will talk. Every village will know who opened the cages.'],
         ['Old Wren', 'The cage keys all came from one man: Captain Brask Hollen. Without him, the cages stay empty.'],
       ],
       reward: (S) => { S.addSilver(40 + 30 * (S.flags.prisonersFreed | 0)); S.giveAll([['bandage', 3]]); },
@@ -319,8 +330,8 @@ const STORY_MORE_CHAPTERS = (() => {
           ['C1', 1, 'in the bushes outside the palisade of {C1}', 'Walk round the palisade. The bushes are outside the walls.'],
           ['V3', 0, 'behind a house in {V3}', 'A bush against a house wall. Walk into it.']].map(([k, h, where, tip], i) => ({
           text: 'Find the torn page ' + where, hint: tip + ' Walk into the bush to pick the page up.',
-          marker: (S) => S.places[k].poi.hides[Math.min(h, S.places[k].poi.hides.length - 1)],
-          setup: (S, M) => { const hs = S.places[k].poi.hides; S.keep(M, S.dropItem('ledger_page', hs[Math.min(h, hs.length - 1)])); },
+          marker: (S) => pageSpot(S, k, h),
+          setup: (S, M) => { S.keep(M, S.dropItem('ledger_page', pageSpot(S, k, h))); },
           check: (S) => S.totalCount('ledger_page') >= i + 1,
           checkpoint: (S) => (k === 'C1' ? S.places.C1.poi.gates[0].out : S.places[k].poi.spots[0]),
           done: (S) => S.lines([['Old Wren', ['"Brask: two hundred in chains, forged by the smith." Page one.', '"The Magistrate pays the wall marksmen by the head." Page two.', '"Signal braziers on the walls: light at dusk, douse at dawn." Page three.'][i]]]),

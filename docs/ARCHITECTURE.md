@@ -628,6 +628,38 @@ The user's Radeon RX 9060 XT ran Ultra at about 600 fps.
   buckle and two pouches on the belt, all skinned; the Order and the player carry a scabbard on the left hip (the hilt
   hides while the sword is drawn) and the Order a quiver across the back.
 
+## 27. A bigger island, 370 challenges, bots with a brain (NET.VERSION 12)
+
+- **The island** (`CONFIG.STORY.ISLAND_RADIUS` 425): five times the first one's land (radius 190). The story's sites spread
+  with it (the keep in the middle, its four villages at half the radius, three camps and the hideout at 0.6), and an
+  outer ring adds four villages and three camps (`outer: true`; each placed at the spot of the ring farthest from every
+  site before it), with roads to the nearest village and round the outer villages. The chapters keep to the inner sites
+  (`_choosePlaces` ignores the outer ones); contracts, viewpoints, challenges and relics use all of them. About 2,500
+  chunks are generated and pinned when story starts (about 9 s on the M1). Each inner camp has a road to both villages
+  beside it; a village takes at most five roads (`VILLAGE_ROADS`: every road needs a lane through it, the houses the rest
+  of the ring) and villages are a little larger (flat 26). People on a route skip a waypoint they keep failing to reach
+  (a house corner at the road's end) instead of pushing at it. The main road of the campaign is now about 81 minutes of
+  walking and waiting for the scripted player (it was 40). Freed prisoners now run for the nearest
+  village instead of the far-off hideout. Saves from the smaller island keep their chapters, silver, gear and challenges,
+  and lose what belonged to its map (viewpoints, the explored map, visited sites, crates).
+- **Relics** (`placeRelics` in worker/sites.js): 120 collectibles, seven in the land round every site and eight in the
+  wilds, seeded; each knows its area. `Story._spawnRelics` / `_collectRelics`, saved as `relics`.
+- **370 challenges** (challenges.js): the 37 kept their ids; the rest are generated - ladders on every counter (new ones:
+  melee, night and head-shot kills, height climbed, distance swum, silver earned), and per place: visit, synchronize,
+  leap from, travel to every viewpoint; takedowns and silent takedowns in every camp, the keep and the villages; a
+  contract in every village and camp; every chapter unseen and untouched; the relics of every area and in total. The
+  journal folds them into groups with their counts.
+- **Battle bots** (ai/bot.js): pick the enemy that matters (hurting them, close, weak, looking at them; they stay on a
+  target), hear gunfire they cannot see (`hearShot`, the 'shot' events within `CONFIG.BOTS.HEARING`) and come at it from
+  the side, fire automatic weapons in bursts at range, swap to a loaded gun rather than reload in a fight, go behind
+  cover (`findCover`: a spot the enemy has no line to) to reload or heal and peek out again, press a weak or reloading
+  enemy, and their aim settles the longer they track someone.
+- **Story guards** (story/npc.js `fight`): swordsmen ring the target at their own places and strike when its back is
+  turned; the two pressing in wait for an opening (it just swung, is staggered, reloading or drawing), cut and step back
+  out, go round a raised sword, sometimes step back from a swing (`GUARD.DODGE`); gunners keep 8-16 blocks and keep
+  moving, and go round to find a line; a target out of reach gets their gun, or they wait under it looking up and call
+  the others. Searching starts where the target was heading and glances up at the roofs.
+
 ## 19. Engine boundaries (what a reusable engine would take)
 
 Not extracted yet. Generic parts (no BLOCKFIRE rules in them): `core/` (fixed-step `Game`, events, rng), `world/`

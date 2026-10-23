@@ -75,9 +75,12 @@ class Story {
     this.saveEnabled = opts.save !== false && !game.replica;
     // challenges and collectibles (challenges.js): counters, named flags, what is done
     this.stats = { kills: 0, silent: 0, arrows: 0, parries: 0, leaps: 0, contracts: 0, travels: 0, purchases: 0, distance: 0, posters: 0,
-      consumed: 0, smokeThrown: 0, upgrades: 0, maxedGear: 0, notorietyMax: 0, chapterClean: 0, chapterCleanHands: 0, chapterUnhurt: 0, nightChapters: 0, deaths: 0 };
+      consumed: 0, smokeThrown: 0, upgrades: 0, maxedGear: 0, notorietyMax: 0, chapterClean: 0, chapterCleanHands: 0, chapterUnhurt: 0, nightChapters: 0, deaths: 0,
+      nightKills: 0, meleeKills: 0, climbed: 0, swum: 0, silverEarned: 0, relics: 0, headshots: 0 };
     this.flags = {};                     // granaryClean, bellsClean, tollsTaken
     this.letters = new Set();            // Order letters read (indexes into ORDER_LETTERS)
+    this.relics = new Set();             // relics found (indexes into plan.relics)
+    this.relicItems = [];
     this.challengesDone = new Set();
     this.visited = new Set();            // site keys the players have set foot in
     this.chap = { spotted: false, innocent: false, hurt: false, alarm: false };   // what happened in this chapter
@@ -98,7 +101,11 @@ class Story {
       ev.on('guardAlert', (e) => this._onAlert(e)),
       ev.on('hayLanding', (e) => { if (e.character.isHuman) this.hayLandings.push({ at: game.time, x: e.x, y: e.y, z: e.z }); }),
       ev.on('parry', (e) => { if (e.character && e.character.isHuman) this.stats.parries++; }),
-      ev.on('leap', (e) => { if (e.character && e.character.isHuman) this.stats.leaps++; }),
+      ev.on('leap', (e) => {
+        if (!e.character || !e.character.isHuman) return;
+        this.stats.leaps++;
+        if (e.vp && e.vp.site) this.flags['leap:' + e.vp.site.key] = true;      // a leap of faith from this site's viewpoint
+      }),
       ev.on('used', (e) => { if (e.character && e.character.isHuman && (e.item === 'bandage' || e.item === 'medkit' || e.item === 'shield_potion')) this.stats.consumed++; }),
     ];
   }
@@ -107,7 +114,8 @@ class Story {
   _choosePlaces() {
     const P = this.plan, d = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
     const take = (from, list) => { list.sort((a, b) => d(a, from) - d(b, from)); return list.shift(); };
-    const vs = P.villages.slice(), cs = P.camps.slice(), out = { hideout: P.hideout, keep: P.keep };
+    // the chapters use the inner sites (the outer ring is for contracts, viewpoints and exploring)
+    const vs = P.villages.filter((v) => !v.outer), cs = P.camps.filter((c) => !c.outer), out = { hideout: P.hideout, keep: P.keep };
     out.V1 = take(P.hideout, vs); out.V2 = take(out.V1, vs); out.V3 = take(out.V2, vs); out.V4 = vs[0] || out.V1;
     out.C1 = take(out.V2, cs); out.C2 = take(out.V3, cs); out.C3 = cs[0] || out.C1;
     return out;
@@ -173,6 +181,7 @@ class Story {
     });
     this.populate();
     this._spawnLetters();
+    this._spawnRelics();
     if (this.shop) this._spawnShopkeeper();
     this._updatePosters();
     this.version++;
@@ -316,6 +325,12 @@ class Story {
   }
 
   /** Walking route from site A to site B along the roads (for NPCs). Ends at a camp's strongbox or a village square. */
+  /** The story's village nearest to a site (by the roads' ends: the one its road leads to, for a camp). */
+  nearestVillage(site) {
+    const vs = this.plan.villages.filter((v) => !v.outer);
+    return vs.reduce((m, v) => (!m || Math.hypot(v.x - site.x, v.z - site.z) < Math.hypot(m.x - site.x, m.z - site.z) ? v : m), null);
+  }
+
   routeBetween(A, B) {
     const roads = this.plan.roads, prev = new Map([[A.id, null]]), q = [A.id];
     while (q.length) {
@@ -446,9 +461,9 @@ class Story {
     if (A.kind === 'chapter') {
       this.chapter++;
       const night = Stealth.isNight(g);
-      if (!this.chap.spotted) this.stats.chapterClean++;
+      if (!this.chap.spotted) { this.stats.chapterClean++; this.flags['ghost:' + (this.chapter - 1)] = true; }
       if (!this.chap.innocent) this.stats.chapterCleanHands++;
-      if (!this.chap.hurt) this.stats.chapterUnhurt++;
+      if (!this.chap.hurt) { this.stats.chapterUnhurt++; this.flags['unhurt:' + (this.chapter - 1)] = true; }
       if (night) this.stats.nightChapters++;
       g.events.emit('storyTitle', { title: 'CHAPTER COMPLETE', sub: A.def.title });
       if (A.def.reward) A.def.reward(this, A.M);
@@ -456,6 +471,7 @@ class Story {
     } else {
       this.contractsDone++;
       this.stats.contracts++;
+      if (A.def.site) this.flags['contract:' + A.def.site] = true;
       this.addSilver(A.def.reward);
       g.events.emit('storyTitle', { title: 'CONTRACT COMPLETE', sub: '+' + A.def.reward + ' silver' });
       if (A.board) this.offers.delete(A.board);
@@ -517,6 +533,7 @@ class Story {
     if (this.anyCombat()) { this.game.events.emit('storyMessage', { text: 'You can\'t travel while you\'re being hunted.', kind: 'warn', character: ch }); return false; }
     ch.teleport(vp.base.x, vp.base.y + 0.01, vp.base.z);
     this.stats.travels++;
+    this.flags['travel:' + vp.site.key] = true;
     this.game.events.emit('travel', { character: ch, vp: vp.id });
     return true;
   }
@@ -705,6 +722,7 @@ class Story {
   }
 
   addSilver(n) {
+    if (n > 0) this.stats.silverEarned += n;
     this.silver = Math.max(0, this.silver + n);
     this.version++;
     this.game.events.emit('silver', { amount: this.silver, delta: n });
@@ -760,6 +778,15 @@ class Story {
       this.stats.kills++;
       if (e.kind === 'assassination') this.stats.silent++;
       if (e.cls === 'bow') this.stats.arrows++;
+      if (e.kind === 'melee') this.stats.meleeKills++;
+      if (e.headshot) this.stats.headshots++;
+      if (Stealth.isNight(this.game)) this.stats.nightKills++;
+      // takedowns per site (the camps' and the keep's challenges)
+      const site = v && v.npcRole === 'guard' ? this.plan.siteAt(v.pos.x, v.pos.z) : null;
+      if (site) {
+        this.flags['kills:' + site.key] = (this.flags['kills:' + site.key] | 0) + 1;
+        if (e.kind === 'assassination') this.flags['silent:' + site.key] = (this.flags['silent:' + site.key] | 0) + 1;
+      }
     }
     if (v && v.isHuman) { this.chap.hurt = true; this.stats.deaths++; }
     if (v.npcRole === 'villager' && !v.tag && k && k.isHuman) {
@@ -784,7 +811,7 @@ class Story {
     if (g.time >= this.upkeepAt) { this.upkeepAt = g.time + 5; this._upkeep(); }
     if (g.time >= this.fogAt) { this.fogAt = g.time + 1; this._explore(); }
     if (g.time >= this.challengeAt) { this.challengeAt = g.time + 1; this._checkChallenges(); }
-    if (g.time >= this.letterAt) { this.letterAt = g.time + 0.5; this._collectLetters(); }
+    if (g.time >= this.letterAt) { this.letterAt = g.time + 0.5; this._collectLetters(); this._collectRelics(); }
     if (g.tickCount % 15 === 0) this._blending();
     this._interactions();
     this._dialogue();
@@ -886,7 +913,7 @@ class Story {
       vps: Array.from(this.synced), fog: this.explored, act: this.activity ? this.activity.kind : 0,
       obj: o ? { t: o.title, x: o.text, h: o.hint, f: o.failing ? 1 : 0, m: mk, tm: o.timer !== null && o.timer !== undefined ? r2(o.timer) : null } : null,
       // the journal (J) and the gear screen read these on a client too
-      jr: { s: this._statsOut(), f: this.flags, l: Array.from(this.letters), c: Array.from(this.challengesDone), vi: Array.from(this.visited) },
+      jr: { s: this._statsOut(), f: this.flags, l: Array.from(this.letters), c: Array.from(this.challengesDone), vi: Array.from(this.visited), rl: Array.from(this.relics) },
     };
   }
 
@@ -946,6 +973,40 @@ class Story {
     });
   }
 
+  /** The relics that are still lying about (plan.relics): pickups counted on collection. */
+  _spawnRelics() {
+    this.relicItems = [];
+    this.plan.relics.forEach((r, i) => {
+      if (this.relics.has(i)) return;
+      const d = new ItemDrop({ id: 'relic', count: 1, data: { relic: i } }, r.x, r.y + 0.3, r.z);
+      d.persistent = true; d.pickupDelay = 0;
+      this.game.addEntity(d);
+      this.relicItems.push(d);
+    });
+  }
+
+  /** Relics picked up are counted (and taken from the pack): the challenges read them by area. */
+  _collectRelics() {
+    for (const h of this.players()) {
+      const inv = h.inventory;
+      for (let i = 0; i < inv.size; i++) {
+        const s = inv.get(i);
+        if (!s || s.id !== 'relic') continue;
+        inv.set(i, null);
+        const n = s.data ? s.data.relic : -1;
+        if (n < 0 || this.relics.has(n) || !this.plan.relics[n]) continue;
+        this.relics.add(n);
+        this.stats.relics = this.relics.size;
+        this.version++;
+        const area = this.plan.relics[n].area, here = this.plan.relics.filter((r) => r.area === area).length;
+        const found = this.plan.relics.filter((r, k) => r.area === area && this.relics.has(k)).length;
+        const where = area === 'wilds' ? 'the wilds' : (this.plan.byKey(area) || { name: area }).name;
+        this.game.events.emit('storyMessage', { text: 'An old relic (' + this.relics.size + '/' + this.plan.relics.length + '). ' + found + ' of ' + here + ' round ' + where + '.', character: h });
+        this.save();
+      }
+    }
+  }
+
   /** Letters picked up are read at once: the letter is taken from the pack and counted. */
   _collectLetters() {
     for (const h of this.players()) {
@@ -970,8 +1031,12 @@ class Story {
     for (const h of this.players()) {
       if (!h.alive) { this._lastXZ.delete(h.id); continue; }
       const prev = this._lastXZ.get(h.id);
-      if (prev) { const d = Math.hypot(h.pos.x - prev.x, h.pos.z - prev.z); if (d < 20) this.stats.distance += d; }
-      this._lastXZ.set(h.id, { x: h.pos.x, z: h.pos.z });
+      if (prev) {
+        const d = Math.hypot(h.pos.x - prev.x, h.pos.z - prev.z);
+        if (d < 20) { this.stats.distance += d; if (h.inWater) this.stats.swum += d; }
+        if (h.climbing && h.pos.y > prev.y && h.pos.y - prev.y < 12) this.stats.climbed += h.pos.y - prev.y;
+      }
+      this._lastXZ.set(h.id, { x: h.pos.x, y: h.pos.y, z: h.pos.z });
       for (const s of this.plan.sites) if (!this.visited.has(s.key) && Math.hypot(s.x - h.pos.x, s.z - h.pos.z) < 28) { this.visited.add(s.key); this.version++; }
     }
   }
@@ -1004,6 +1069,7 @@ class Story {
       v: 3, seed: this.game.seed, chapter: this.chapter, finished: this.finished, shop: this.shop, silver: this.silver,
       synced: Array.from(this.synced), explored: this.explored, contracts: this.contractsDone,
       inv: p ? p.inventory.serialize() : null,
+      island: CONFIG.STORY.ISLAND_RADIUS, relics: Array.from(this.relics),
       stats: this.stats, flags: this.flags, letters: Array.from(this.letters), crates: Array.from(this.crates || []).map(([k, t]) => [k, t - this.game.time]), challenges: Array.from(this.challengesDone), visited: Array.from(this.visited),
     };
     try { localStorage.setItem(STORY_SAVE_KEY, JSON.stringify(data)); } catch (e) { /* storage full / blocked */ }
@@ -1023,6 +1089,11 @@ class Story {
     this.contractsDone = d.contracts | 0;
     this.synced = new Set((d.synced || []).filter((i) => this.plan.viewpoints[i]));
     this.explored = Array.isArray(d.explored) ? d.explored.slice(0, 2000) : [];
+    this.relics = new Set((d.relics || []).filter((i) => this.plan.relics[i]));
+    this.stats.relics = this.relics.size;
+    // a save from the smaller island: its chapters, silver, gear and challenges carry over; what belonged to that map
+    // (viewpoints, the explored map, sites visited, crates) does not
+    if (d.island !== CONFIG.STORY.ISLAND_RADIUS) { this.synced = new Set(); this.explored = []; this.visited = new Set(); this.crates = new Map(); }
   }
 
   /**

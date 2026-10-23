@@ -214,7 +214,7 @@ class GuardController extends NpcController {
       }
       const engaged = this.state === 'combat' && this.target === p;
       if (seen) {
-        this.lastSeenAt.set(p.id, { pos: p.pos.clone(), at: game.time });
+        this.lastSeenAt.set(p.id, { pos: p.pos.clone(), at: game.time, vel: p.vel.clone() });
         const rate = engaged ? 10 : A.RATE * Math.max(0.15, 1 - d / range) * Stealth.suspicion(game, ch, p) * (alarm ? 1.5 : 1) * (p.isHuman ? Gear.stealthMult(p) : 1);
         const cap = engaged ? 1 : Stealth.awarenessCap(game, p);
         lv = rate > 0 ? Math.min(cap, lv + rate * dt) : Math.max(0, lv - A.DECAY * dt);
@@ -305,10 +305,14 @@ class GuardController extends NpcController {
   }
 
   startSearch(game, ch, pos, time) {
+    // they were going somewhere: search from where they'd be by now, not where they were last seen
+    const t = this.target, seen = t && this.lastSeenAt.get(t.id);
+    const ahead = pos.clone();
+    if (seen && seen.vel && game.time - seen.at < 6) ahead.addScaledVector(seen.vel.clone().setY(0), Math.min(2.5, game.time - seen.at + 1.2));
     this.state = 'search';
     this.target = null;
-    this.focus = pos.clone();
-    this.searchGoal = pos.clone();
+    this.focus = ahead;
+    this.searchGoal = ahead.clone();
     this.searchUntil = game.time + time;
     Stealth.bark(game, ch, 'search');
   }
@@ -334,6 +338,8 @@ class GuardController extends NpcController {
       return;
     }
     if (this.marksman) { this.look(ch, it, Math.atan2(-(this.focus.x - ch.pos.x), -(this.focus.z - ch.pos.z)) + Math.sin(game.time * 0.6) * 0.8, 0, dt); return; }
+    // glance up at the roofs and walls now and then: the Order climbs
+    if (Math.sin(game.time * 0.9 + this.phase) > 0.55) { it.lookDY = Math.max(-0.08, Math.min(0.08, 0.55 - ch.pitch)); }
     if (!this.searchGoal || this.walk(game, ch, it, this.searchGoal, dt, 0.7, 1.5)) {
       // next: a hiding spot nearby if there is one (guards poke the hay), else a random point
       const story = game.story, f = this.focus;
@@ -354,6 +360,15 @@ class GuardController extends NpcController {
     return -1;
   }
 
+  /**
+   * The fight. Marksmen and guards without a sword shoot from where they stand (gunners back off when you close in).
+   * Swordsmen: the two nearest press in, the rest ring the target at their own places round it (so it cannot simply
+   * back away from all of them) and strike when its back is turned. A pressing guard keeps its distance until it sees an
+   * opening - the target just swung, is staggered, reloading or drawing a bow - or a moment has passed; then steps in,
+   * cuts and steps back out. It sidesteps round a raised guard rather than hacking into it, and gives ground when the
+   * target swings at it. A target out of a sword's reach (on a roof, up a wall) gets the guard's gun if he has one;
+   * otherwise he waits under it, looking up, and calls the others.
+   */
   fight(game, ch, it, dt) {
     const t = this.target;
     if (!t) return;
@@ -363,30 +378,112 @@ class GuardController extends NpcController {
     const visible = !!seen && game.time - seen.at < 0.35;
     const gun = this.slotOf(ch, (i) => i && i.kind === 'weapon');
     const sword = this.slotOf(ch, (i) => i && i.kind === 'blade');
-    if (gun >= 0 && (this.marksman || sword < 0) && d > 5) {
+    const above = t.pos.y - ch.pos.y > 2.2 || (t.climbing && t.pos.y - ch.pos.y > 1.2);
+    if (gun >= 0 && (this.marksman || sword < 0 || (above && visible)) && (d > 5 || above)) {
       if (ch.selectedSlot !== gun) { it.slot = gun; return; }
       if (!visible) {
-        // marksmen keep their perch and watch where the target vanished; others close in
-        if (this.marksman) this.faceTo(ch, it, goal, dt); else this.walk(game, ch, it, goal, dt, 1, 3);
+        // marksmen keep their perch and watch where the target vanished; others go round to find a line on it
+        if (this.marksman) this.faceTo(ch, it, goal, dt);
+        else {
+          const ax = goal.x - ch.pos.x, az = goal.z - ch.pos.z, L = Math.hypot(ax, az) || 1, side = (ch.id % 2 ? 1 : -1) * Math.min(6, L * 0.4);
+          this.walk(game, ch, it, new THREE.Vector3(goal.x - az / L * side, goal.y, goal.z + ax / L * side), dt, 1, 3);
+        }
         return;
       }
-      if (d < 9) { const away = ch.pos.clone().multiplyScalar(2).sub(t.pos); this.moveDir(ch, it, away.x - ch.pos.x, away.z - ch.pos.z); }
+      if (!this.marksman) {
+        // gunners: keep 8-16 blocks, never stand still
+        const ax = ch.pos.x - t.pos.x, az = ch.pos.z - t.pos.z, L = Math.max(0.1, Math.hypot(ax, az)), side = Math.sin(game.time * 0.8 + this.phase) > 0 ? 1 : -1;
+        const back = d < 8 ? 1 : d > 16 ? -1 : 0;
+        this.moveDir(ch, it, ax / L * back - az / L * side * 0.7, az / L * back + ax / L * side * 0.7);
+      }
       this.shoot(game, ch, it, dt, t, d);
       return;
     }
     if (sword >= 0 && ch.selectedSlot !== sword) { it.slot = sword; return; }
-    // take turns: only the two guards closest to the target press in, the rest circle at a distance
-    const pressing = this.mayPress(game, ch, t);
-    if (!pressing && visible && d < 5.5) {
-      const side = Math.sin(game.time * 0.7 + this.phase) > 0 ? 1 : -1;
-      const ax = ch.pos.x - t.pos.x, az = ch.pos.z - t.pos.z, L = Math.max(0.1, Math.hypot(ax, az));
-      this.moveDir(ch, it, -az / L * side + (d < 3.5 ? ax / L : 0), ax / L * side + (d < 3.5 ? az / L : 0));
-      it.moveX *= 0.5; it.moveZ *= 0.5;
-    } else if (d > 1.9 || !visible) this.walk(game, ch, it, goal, dt, 1, pressing ? 1.5 : 4);
-    if (visible) this.faceTo(ch, it, t.pos, dt);
-    if (pressing && d <= 2.3 && visible && game.time >= this.reactAt && !ch.windup && (ch.bladeCd || 0) <= 0 && Math.abs(t.pos.y - ch.pos.y) < 1.6) {
-      it.fire = true; it.firePressed = true;
+    if (above) {
+      // out of reach: stand under them, look up, keep the others coming
+      this.walk(game, ch, it, new THREE.Vector3(t.pos.x, ch.pos.y, t.pos.z), dt, 1, 2.5);
+      this.faceTo(ch, it, t.pos, dt);
+      it.lookDY = Math.max(-0.1, Math.min(0.1, Math.atan2(t.pos.y - ch.pos.y, Math.max(1, d)) - ch.pitch));
+      if (game.time > (this.callAt || 0)) { this.callAt = game.time + 4; Stealth.alert(game, ch, t, t.pos.clone()); }
+      return;
     }
+    const pressing = this.mayPress(game, ch, t);
+    const now = game.time, ax = ch.pos.x - t.pos.x, az = ch.pos.z - t.pos.z, L = Math.max(0.1, Math.hypot(ax, az));
+    const rx = ax / L, rz = az / L;                                       // from the target to us
+    // is the target looking at us? (its back turned: the circling guards strike)
+    const facingUs = (-Math.sin(t.yaw) * rx - Math.cos(t.yaw) * rz) > 0.5;
+    if (!pressing && visible) {
+      if (!facingUs && d < 4.5 && now >= this.reactAt && (ch.bladeCd || 0) <= 0 && !ch.windup) {
+        // its back is to us: in and cut
+        this.walk(game, ch, it, t.pos, dt, 1, 1.6);
+        this.faceTo(ch, it, t.pos, dt);
+        if (d <= 2.3) { it.fire = true; it.firePressed = true; }
+        return;
+      }
+      // our own place on the ring round the target
+      const ring = this.ringSlot(game, ch, t), want = new THREE.Vector3(t.pos.x + Math.cos(ring) * 4.4, t.pos.y, t.pos.z + Math.sin(ring) * 4.4);
+      if (Math.hypot(want.x - ch.pos.x, want.z - ch.pos.z) > 0.8) { this.walk(game, ch, it, want, dt, 0.9, 0.6); it.sprint = false; }
+      this.faceTo(ch, it, t.pos, dt);
+      return;
+    }
+    if (!visible) { this.walk(game, ch, it, goal, dt, 1, pressing ? 1.5 : 4); return; }
+    this.faceTo(ch, it, t.pos, dt);
+    const S = CONFIG.STORY.GUARD;
+    // stepping back out after a cut, or away from the target's swing
+    if (now < (this.backUntil || 0)) {
+      this.moveDir(ch, it, rx + -rz * this.sideDir * 0.6, rz + rx * this.sideDir * 0.6);
+      return;
+    }
+    const theySwing = (t.strikeUntil || 0) > now && facingUs && d < 3.2;
+    if (theySwing && !ch.windup && this.rng.chance(S.DODGE || 0.35)) { this.backUntil = now + 0.35; this.sideDir = this.rng.chance(0.5) ? 1 : -1; return; }
+    // an opening: they just cut, are staggered, reloading or drawing; or we've waited long enough
+    const opening = (t.bladeCd || 0) > 0.12 || (t.stunnedUntil || 0) > now || !!t.reload || (t.draw || 0) > 0.2 || !facingUs || now > (this.patientUntil || 0);
+    const blocked = !!t.blocking && facingUs;
+    if (blocked) {
+      // round the raised sword: step to its side, where it does not cover
+      this.moveDir(ch, it, -rz * this.sideDirFor(game) - rx * 0.2, rx * this.sideDirFor(game) - rz * 0.2);
+      if (d > 2.6) { it.moveZ = Math.max(it.moveZ, 0.6); }
+      return;
+    }
+    if (opening && d > 2.1) { this.walk(game, ch, it, t.pos, dt, 1, 1.5); it.sprint = d > 4; }
+    else if (!opening) {
+      // keep just out of reach, circling
+      const keep = d < 2.8 ? 1 : d > 3.6 ? -1 : 0;
+      this.moveDir(ch, it, rx * keep - rz * this.sideDirFor(game) * 0.8, rz * keep + rx * this.sideDirFor(game) * 0.8);
+      it.moveX *= 0.6; it.moveZ *= 0.6;
+    }
+    if (opening && d <= 2.3 && now >= this.reactAt && !ch.windup && (ch.bladeCd || 0) <= 0 && Math.abs(t.pos.y - ch.pos.y) < 1.6) {
+      it.fire = true; it.firePressed = true;
+      // after the cut: step back out, then wait for the next opening (a little impatient)
+      this.backUntil = now + (S.WINDUP_BACK || 0.75);
+      this.sideDir = this.rng.chance(0.5) ? 1 : -1;
+      this.patientUntil = now + this.rng.float(1.1, 2.2);
+    }
+  }
+
+  /** Which way this guard circles (changes now and then, so the circle does not become a pattern). */
+  sideDirFor(game) {
+    if (game.time > (this.sideUntil || 0)) { this.sideUntil = game.time + this.rng.float(1.2, 2.6); this.sideDir = this.rng.chance(0.5) ? 1 : -1; }
+    return this.sideDir || 1;
+  }
+
+  /** This guard's angle on the ring round the target: the fighting guards share the circle out evenly. */
+  ringSlot(game, ch, t) {
+    if (game.time < (this.ringCheck || 0)) return this.ringAngle;
+    this.ringCheck = game.time + 0.6;
+    const ring = [];
+    for (const c of game.characters()) {
+      if (!c.alive || c.npcRole !== 'guard' || !c.controller || c.controller.state !== 'combat' || c.controller.target !== t || c.controller.marksman) continue;
+      ring.push(c);
+    }
+    ring.sort((a, b) => a.id - b.id);
+    const i = Math.max(0, ring.indexOf(ch)), n = Math.max(1, ring.length);
+    const base = Math.atan2(ch.pos.z - t.pos.z, ch.pos.x - t.pos.x);
+    // the ring keeps its turn from the first guard; each guard its own share of it
+    if (this.ringBase === undefined || n !== this.ringN) { this.ringBase = i === 0 ? base : (ring[0].controller.ringBase !== undefined ? ring[0].controller.ringBase : base); this.ringN = n; }
+    this.ringAngle = this.ringBase + i * Math.PI * 2 / n;
+    return this.ringAngle;
   }
 
   /** Is this guard one of the two sword-fighters nearest the target? (re-checked twice a second) */
@@ -524,8 +621,13 @@ class AllyController extends NpcController {
         return it;
       }
       if (this.walk(game, ch, it, this.points[this.i], dt, this.pace, 1.2)) {
-        this.i++;
+        this.i++; this.wpTries = null;
         if (this.i >= this.points.length) this.done = true;
+      } else if (this.nav && this.i < this.points.length - 1) {
+        // a waypoint we keep failing to reach (a house corner, a ledge on the road's edge): leave it and go on to the next
+        const N = this.nav, tries = (N.stucks || 0) + (N.noPath || 0);
+        if (this.wpTries === null || this.wpTries === undefined || this.wpAt !== this.i) { this.wpTries = tries; this.wpAt = this.i; }
+        else if (tries - this.wpTries >= 2) { this.i++; this.wpTries = null; N.path = null; N.stuck = 0; }
       }
       return it;
     }
